@@ -1,0 +1,3 @@
+﻿  arbitrary_precision.cpp
+D:\Saves\Programming\arbitrary_precision\arbitrary_precision.cpp(634,29): warning C4244: 'argument': conversion from 'double' to 'int', possible loss of data
+  arbitrary_precision.vcxproj -> D:\Saves\Programming\arbitrary_precision\x64\Debug\arbitrary_precision.exe
