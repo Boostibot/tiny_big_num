@@ -8,6 +8,7 @@
 #include <cstddef>
 #include <cassert>
 #include <span>
+#include <limits>
 
 #define let const auto
 #define mut auto
@@ -230,48 +231,6 @@ proc null_n(T* to, const T* from, size_t count) -> void
         memset(to, 0, count * sizeof(T));
 }
 
-namespace detail
-{   
-    template<integral T, size_t static_capacity_>
-    struct Big_Int_Data
-    {
-        T* data = nullptr;
-        size_t size = 0;
-        size_t capacity = 0;
-        char sign = false; //positive
-        //will maybe get fused with capacity as last bit (to revove padding and enable more elemensts to 
-        // be stored inline inside the struct itself
-        T static_data_[static_capacity_] = {0};
-    };
-
-    template<integral T>
-    struct Big_Int_Data<T, 0>
-    {
-        T* data = nullptr;
-        size_t size = 0;
-        size_t capacity = 0;
-        char sign = false; //positive
-    };
-
-    template<integral T, size_t scap>
-    func static_data(Big_Int_Data<T, scap>* data) -> T*
-    {
-        if constexpr(scap != 0)
-            return data->static_data_;
-        else
-            return nullptr;
-    }
-
-    template<integral T, size_t scap>
-    func static_data(const Big_Int_Data<T, scap>* data) -> const T*
-    {
-        if constexpr(scap != 0)
-            return data->static_data_;
-        else
-            return nullptr;
-    }
-}
-
 
 template <typename Grow>
 concept grower = requires(size_t to_fit, size_t capacity, size_t size, size_t static_capacity, size_t elem_size)
@@ -305,32 +264,63 @@ struct Def_Grow
 
 static_assert(grower<Def_Grow<2, 0, 8>>);
 
+namespace detail
+{   
+    template<integral T, size_t static_capacity_>
+    struct Big_Int_Data
+    {
+        T* data = nullptr;
+        size_t size = 0;
+        size_t capacity = 0;
+        char sign = false; //positive
+        //will maybe get fused with capacity as last bit (to revove padding and enable more elemensts to 
+        // be stored inline inside the struct itself
+        T static_data_[static_capacity_] = {0};
+    };
+
+    template<integral T>
+    struct Big_Int_Data<T, 0>
+    {
+        T* data = nullptr;
+        size_t size = 0;
+        size_t capacity = 0;
+        char sign = false; //positive
+    };
+
+}
+
 template <
     integral T, 
     size_t static_capacity_, 
     std_allocator Alloc_, 
     grower Grow
 >
-    struct Big_Int_;
+struct Big_Int_;
 
-#define Big_Int_TEMPL class T, size_t scap, class Alloc, class Grow
+#define BIG_INT_TEMPL class T, size_t scap, class Alloc, class Grow
 #define Big_Int_T Big_Int_<T, scap, Alloc, Grow>
+
+template<BIG_INT_TEMPL>
+func static_data(Big_Int_T* data) -> T*;
+
+template<BIG_INT_TEMPL>
+func static_data(const Big_Int_T* data) -> const T*;
 
 namespace detail 
 {
-    template<Big_Int_TEMPL>
+    template<BIG_INT_TEMPL>
     proc assign(Big_Int_T* to, Big_Int_T const& other) -> void;
 
-    template<Big_Int_TEMPL>
+    template<BIG_INT_TEMPL>
     proc swap(Big_Int_T* left, Big_Int_T* right) noexcept -> void;
 
-    template<Big_Int_TEMPL>
+    template<BIG_INT_TEMPL>
     proc alloc_data(Big_Int_T* num, size_t capacity) -> void;
 
-    template<Big_Int_TEMPL>
+    template<BIG_INT_TEMPL>
     proc dealloc_data(Big_Int_T* num) -> void;
 
-    template<Big_Int_TEMPL, typename T_>
+    template<BIG_INT_TEMPL, typename T_>
     proc to_owned(Big_Int_T* num, span<T_> const& other) -> void;
 }
 
@@ -340,7 +330,7 @@ template <
     std_allocator Alloc_ = std::allocator<T_>, 
     grower Grow = Def_Grow<2, 0, 8>
 >
-    struct Big_Int_ : Alloc_, detail::Big_Int_Data<T_, static_capacity_>
+struct Big_Int_ : Alloc_, detail::Big_Int_Data<T_, static_capacity_>
 {   
     using T = T_;
     using Alloc = Alloc_;
@@ -377,7 +367,7 @@ template <
         requires (has_static_storage)
         : Alloc{move(alloc)}, Big_Int_Data{data, size, capacity} 
     {
-        copy_n(static_data(this), static_data. static_capacity);
+        copy_n(static_data(this), static_data, static_capacity);
     }
 
     constexpr Big_Int_(T* data, size_t size, size_t capacity, Alloc alloc = Alloc()) noexcept
@@ -411,29 +401,68 @@ template <
     }
 
     constexpr operator slice_type() noexcept 
-        { return slice_type{this->data, this->size}; }
+    { 
+        return slice_type{this->data, this->size}; 
+    }
 
     constexpr operator const_slice_type() const noexcept 
-        { return const_slice_type{this->data, this->size}; }
+    { 
+        return const_slice_type{this->data, this->size}; 
+    }
 
+    func operator[](size_t i) noexcept -> T& 
+    {
+        assert(i < this->size);
+        return this->data[i];
+    }
+
+    func operator[](size_t i) const noexcept -> T const& 
+    {
+        assert(i < this->size);
+        return this->data[i];
+    }
 };
 
 namespace std 
 {
-    template <Big_Int_TEMPL>
+    template <BIG_INT_TEMPL>
     proc swap(Big_Int_T& num1, Big_Int_T& num2)
     {
         return detail::swap(&num1, &num2);
     }
 }
 
-template <Big_Int_TEMPL>
-func alloc(Big_Int_T const& list) -> Alloc const& { return *cast(const Alloc*) &list; }
+template <BIG_INT_TEMPL>
+func static_data(Big_Int_T* data) -> T*
+{
+    if constexpr(scap != 0)
+        return data->static_data_;
+    else
+        return nullptr;
+}
 
-template <Big_Int_TEMPL>
-func alloc(Big_Int_T* list) -> Alloc* { return cast(Alloc*) list; }
+template <BIG_INT_TEMPL>
+func static_data(const Big_Int_T* data) -> const T*
+{
+    if constexpr(scap != 0)
+        return data->static_data_;
+    else
+        return nullptr;
+}
 
-template <Big_Int_TEMPL>
+template <BIG_INT_TEMPL>
+func alloc(Big_Int_T const& list) -> Alloc const& 
+{ 
+    return *cast(const Alloc*) &list; 
+}
+
+template <BIG_INT_TEMPL>
+func alloc(Big_Int_T* list) -> Alloc* 
+{ 
+    return cast(Alloc*) list; 
+}
+
+template <BIG_INT_TEMPL>
 func is_invariant(const Big_Int_T& num) -> bool
 {
     const bool size_inv = num.capacity >= num.size;
@@ -445,14 +474,14 @@ func is_invariant(const Big_Int_T& num) -> bool
     return size_inv && capa_inv && data_inv;
 }
 
-template <Big_Int_TEMPL>
+template <BIG_INT_TEMPL>
 func is_static_alloced(Big_Int_T const& num) noexcept
 {
     assert(is_invariant(num));
     return num.capacity == num.static_capacity && num.has_static_storage; 
 }
 
-template <Big_Int_TEMPL>
+template <BIG_INT_TEMPL>
 proc call_grow_function(const Big_Int_T& num, size_t to_fit) -> size_t
 {
     return cast(size_t) Big_Int_T::grow_type::run(
@@ -466,7 +495,7 @@ proc call_grow_function(const Big_Int_T& num, size_t to_fit) -> size_t
 
 namespace detail 
 {
-    template<Big_Int_TEMPL>
+    template<BIG_INT_TEMPL>
     proc assign(Big_Int_T* to, Big_Int_T const& other) -> void
     {
         if(to->capacity < other.size)
@@ -479,20 +508,19 @@ namespace detail
         to->size = other.size;
     }
 
-    template<Big_Int_TEMPL>
+    template<BIG_INT_TEMPL>
     proc swap(Big_Int_T* left, Big_Int_T* right) noexcept -> void 
     {
         using Big_Int = Big_Int_T;
         constexpr let transfer_static = [](Big_Int* left, Big_Int* right)
         {
-            size_t to_size = min(left->size, right->size);
-            for (size_t i = 0; i < to_size; i++)
-                std::swap((*left)[i], (*right)[i]);
+            for (size_t i = 0; i < left->static_capacity; i++)
+                std::swap(*static_data(left), *static_data(right));
         };
 
         constexpr let transfer_half_static = [=](Big_Int* from, Big_Int* to)
         {
-            transfer_static(from, to, 0, from->size);
+            copy_n(static_data(to), static_data(from), to->static_capacity);
 
             from->data = to->data;
             to->data = static_data(to);
@@ -514,7 +542,7 @@ namespace detail
             std::swap(*alloc(left), *alloc(right));
     }
 
-    template<Big_Int_TEMPL>
+    template<BIG_INT_TEMPL>
     proc alloc_data(Big_Int_T* num, size_t capacity) -> void 
     {
         if(capacity <= num->static_capacity)
@@ -532,7 +560,7 @@ namespace detail
         num->data = allocate<T>(alloc(num), num->capacity * sizeof(T), DEF_ALIGNMENT<T>);
     }
 
-    template<Big_Int_TEMPL>
+    template<BIG_INT_TEMPL>
     proc dealloc_data(Big_Int_T* num) -> void 
     {
         if(num->capacity > num->static_capacity)
@@ -544,7 +572,7 @@ namespace detail
     // when called with new_capacity = 0 acts as dealloc_data
     // Destroys elements when shrinking but does not construct new ones when growing 
     //  (because doesnt know how to)
-    template<Big_Int_TEMPL>
+    template<BIG_INT_TEMPL>
     proc set_capacity(Big_Int_T* num, size_t new_capacity) -> void 
     {
         T* new_data = nullptr;
@@ -577,7 +605,7 @@ namespace detail
         num->capacity = new_capacity;
     }
 
-    template<Big_Int_TEMPL, typename T_>
+    template<BIG_INT_TEMPL, typename T_>
     proc to_owned(Big_Int_T* num, span<T_> const& other) -> void 
     {
         alloc_data(num, other.size());
@@ -587,7 +615,7 @@ namespace detail
 }
 
 
-template <Big_Int_TEMPL>
+template <BIG_INT_TEMPL>
 proc reserve(Big_Int_T* num, size_t to_fit) -> bool
 {
     assert(is_invariant(*num));
@@ -608,64 +636,207 @@ proc reserve(Big_Int_T* num, size_t to_fit) -> bool
     return true;
 }
 
-template <Big_Int_TEMPL>
+template <BIG_INT_TEMPL>
 proc clear(Big_Int_T* num)
 {
     assert(is_invariant(*num));
     num.size = 0;
 }
 
-template <Big_Int_TEMPL>
+template <BIG_INT_TEMPL>
 func empty(Big_Int_T const& num) noexcept
 {
     assert(is_invariant(num));
     return num.size == 0;
 }
 
-template <Big_Int_TEMPL>
+template <BIG_INT_TEMPL>
 func is_empty(Big_Int_T const& num) noexcept
 {
     assert(is_invariant(num));
     return num.size == 0;
 }
 
-template <Big_Int_TEMPL>
-func operator +=(Big_Int_T& num, Big_Int_T const& num2)
+template <BIG_INT_TEMPL>
+proc push(Big_Int_T* num, no_infer(T) what) -> T*
 {
+    assert(is_invariant(*num));
 
+    reserve(num, num->size + 1);
+    num->data[num->size] = what;
+    num->size++;
+
+    assert(is_invariant(*num));
+    return num->data + num->size - 1;
+}
+
+template <BIG_INT_TEMPL>
+proc pop(Big_Int_T* num) -> T
+{
+    assert(is_invariant(*num));
+    assert(num->size != 0);
+
+    num->size--;
+
+    return num->data[num->size];
+}
+
+template <BIG_INT_TEMPL>
+proc resize(Big_Int_T* num, size_t to) -> void
+{
+    assert(is_invariant(*num));
+    assert(0 <= to);
+
+    reserve(num, to);
+    num->size = to;
+
+    if(num->size < to)
+        null_n(num->data + num->size, to - num->size);
+
+    assert(is_invariant(*num));
+}
+
+template <BIG_INT_TEMPL>
+proc resize(Big_Int_T* num, size_t to, no_infer(T) fill_with = T()) -> void
+{
+    assert(is_invariant(*num));
+    assert(0 <= to);
+
+    reserve(num, to);
+    num->size = to;
+
+    for (size_t i = num->size; i < to; i++)
+        (*num)[i] = fill_with;
+
+    assert(is_invariant(*num));
+}
+
+template <integral T>
+func add_assign_carry(span<T>* to, span<const T> from) -> T
+{
+    assert(to.size() >= from.size());
+
+    T* from_it = from.data;  
+    T* from_end = from.data + from.size; 
+    size_t add_to = min(from.size, to->size);
+
+    T* to_it = to->data;
+    T* to_end = to->data + to->size;
+
+    T next_carry = 0;
+
+    for (size_t i = 0; from_it < add_to; i++, from_it++, to_it++)
+    {
+        T patched_from = *from_it + next_carry;
+
+        T curr_carry = 0;
+        //if overflowed by adding last carry set new carry
+        if(patched_from < *from_it)
+            curr_carry = 1;
+
+        //add the (patched) from word
+        *to_it += patched_from;
+
+        //set the next carry
+        if(*to_it < patched_from)
+            next_carry = 1;
+        else
+            next_carry = curr_carry;
+    }
+
+    //increment each word until carry is consumed
+    for (; next_carry != 0 && to_it != to_end; to_it++)
+    {
+        T before_increment = *to_it;
+        *to_it += carry;
+
+        if(*to_it < before_increment)
+            next_carry = 1;
+        else
+            next_carry = 0;
+    }
+
+    return carry;
+}
+
+template <integral T>
+func zeros_from_index(span<T> num) -> span<T>
+{
+    size_t to = num.size();
+    for(; to-- > 0;)
+        if(num[to] != 0)
+            break;
+
+    return to + 1;
+}
+
+template <integral T>
+func sub_assign_carry(span<T>* to, span<const T> from) -> T
+{
+    assert(to->size() >= from.size());
+
+    size_t min_size = min(to->size(), from.size());
+    constexpr T type_max = std::numeric_limits<T>::max();
+
+    mut pos1 = to->begin();
+    mut pos2 = from.begin();
+    mut to_end = to->end();
+    mut from_end = from.end();
+
+    size_t i = 0;
+    T borrow = 0;
+
+    for(; i < min_size; i++, pos1++, pos2++)
+    {
+        *pos1 -= borrow;
+        //if undeflowed as a result of borrow
+        if(*pos1 == type_max)
+            borrow = 1;
+
+        //always substarcts the bigger from the smaller 
+        // and in the case its negative modulates and sets borrow
+        if(*pos1 > *pos2)
+            *pos1 -= *pos2;
+        else
+        {
+            borrow = 1;
+            *pos1 = type_max - (*pos2 - *pos1);
+        }
+    }
+
+    if(borrow != 0)
+    {
+        for(; pos1 != to_end; pos1++)
+        {
+            if(pos1 == 0)
+                pos1 = type_max
+            else
+            {
+                pos1 -= 1;
+                borrow = 0;
+            }
+        }
+    }
+
+    return borrow;
+}
+
+template <BIG_INT_TEMPL>
+runtime_proc print_digits(Big_Int_T const& num)
+{
+    for(let word : num)
+        std::cout << word;
 }
 
 
 int main()
 {
-    Big_Int_<u64> num;
-    reserve(&num, 20);
+    Big_Int_<u64> num1 = 7;
+    Big_Int_<u64> num2 = 7;
 
-    let x = div_round_up(5, 5.0);
-
-    u64 arr[] = {1, 2, 3};
-    span s{arr, 3};
-    span<const u64> sc{arr, 3};
-
-    { Big_Int_<u64> num(s); }
-    { Big_Int_<u64> num(sc); }
-    { 
-        Big_Int_<u64> num = 10; 
-        for(auto val: num)    
-            std::cout << val;
-    }
-    { Big_Int_<u64> num = Big_Int_<u64>(std::allocator<u64>()); }
+    //let res = add(num1, num2);
+    //print_digits(res);
+    int a = 5;
 
     std::cout << "\nOK\n";
 }
-
-// Run program: Ctrl + F5 or Debug > Start Without Debugging menu
-// Debug program: F5 or Debug > Start Debugging menu
-
-// Tips for Getting Started: 
-//   1. Use the Solution Explorer window to add/manage files
-//   2. Use the Team Explorer window to connect to source control
-//   3. Use the Output window to see build output and other messages
-//   4. Use the Error List window to view errors
-//   5. Go to Project > Add New Item to create new code files, or Project > Add Existing Item to add existing code files to the project
-//   6. In the future, to open this project again, go to File > Open > Project and select the .sln file

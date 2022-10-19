@@ -1,0 +1,15 @@
+.vs
+x64
+.vs/arbitrary_precision/v17/.suo
+.vs/arbitrary_precision/v17/.suo
+*.db
+*.ipch
+*.lastbuildstate
+*.tlog
+*.exe
+*.recipe
+*.ilk
+*.log
+*.obj
+*.pdb
+*.idb
