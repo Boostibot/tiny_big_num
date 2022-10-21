@@ -1,6 +1,3 @@
-// arbitrary_precision.cpp : This file contains the 'main' function. Program execution begins and ends there.
-//
-
 #include <iostream>
 #include <vector>
 #include <concepts>
@@ -68,7 +65,7 @@ func min(T first) -> T
 
 template<typename T, typename ...Ts>
 func max(T first, Ts... values)
-    requires (std::convertible_to<Ts, T> && ...)
+    //requires (std::convertible_to<Ts, T> && ...)
 {
     let rest_max = max(values...);
     if(rest_max > first)
@@ -79,7 +76,7 @@ func max(T first, Ts... values)
 
 template<typename T, typename ...Ts>
 func min(T first, Ts... values...)
-    requires (std::convertible_to<Ts, T> && ...)
+    //requires (std::convertible_to<Ts, T> && ...)
 {
     let rest_max = max(values...);
     if(rest_max < first)
@@ -220,7 +217,7 @@ proc copy_n(T* to, const T* from, size_t count) -> void
 }
 
 template <integral T>
-proc null_n(T* to, const T* from, size_t count) -> void
+proc null_n(T* to, size_t count) -> void
 {
     if (std::is_constant_evaluated())
     {
@@ -697,7 +694,7 @@ proc resize(Big_Int_T* num, size_t to) -> void
 }
 
 template <BIG_INT_TEMPL>
-proc resize(Big_Int_T* num, size_t to, no_infer(T) fill_with = T()) -> void
+proc resize(Big_Int_T* num, size_t to, no_infer(T) fill_with) -> void
 {
     assert(is_invariant(*num));
     assert(0 <= to);
@@ -711,49 +708,120 @@ proc resize(Big_Int_T* num, size_t to, no_infer(T) fill_with = T()) -> void
     assert(is_invariant(*num));
 }
 
+
+
+template <typename T>
+constexpr size_t BIT_SIZE = sizeof(T) * CHAR_BIT;
+template <typename T>
+constexpr size_t HALF_BIT_SIZE = BIT_SIZE<T> / 2;
+
+template <integral T>
+constexpr T LOW_MASK = cast(T)(cast(T)(-1) >> HALF_BIT_SIZE<T>);
+template <integral T>
+constexpr T HIGH_MASK = cast(T)(cast(T)(-1) << HALF_BIT_SIZE<T>);
+template <integral T>
+constexpr T HIGH_1 = cast(T)(cast(T)(1) << HALF_BIT_SIZE<T>); 
+
+template <integral T>
+func high_bits(T value) -> T {
+    return value >> HALF_BIT_SIZE<T>;
+};  
+
+template <integral T>
+func low_bits(T value) -> T {
+    return value & LOW_MASK<T>;
+};  
+
+template <integral T>
+func combine_bits(T low, T high) -> T {
+    return (low & LOW_MASK<T>) | (high << HALF_BIT_SIZE<T>);
+};
+
+namespace detail
+{
+    enum class Additive_Mode 
+    {
+        ADD,
+        SUB
+    };
+
+    template <Additive_Mode mode, integral T>
+    proc add_or_sub_assign_carry(span<T>* to, span<const T> from) -> T
+    {
+        assert(to->size() >= from.size());
+
+        let add_sub_half = [](T last, T left, T right){
+            if constexpr(mode == Additive_Mode::ADD)
+                return left + right + high_bits(last);
+            else
+                return left - right + high_bits(last);
+        };  
+
+        T last = 0;
+        for(size_t i = 0; i < from.size(); i++)
+        {
+            const T from_val = from[i];
+            const T to_val = (*to)[i];
+
+            const T res_low = add_sub_half(last, low_bits(from_val), low_bits(to_val));
+            const T res_high = add_sub_half(res_low, high_bits(from_val), high_bits(to_val));
+
+            const T res = combine_bits(res_low, res_high);
+
+            (*to)[i] = res;
+            last = res;
+        }
+
+        return high_bits(last) > 0 ? 1 : 0;
+    }
+}
+
 template <integral T>
 func add_assign_carry(span<T>* to, span<const T> from) -> T
 {
-    assert(to.size() >= from.size());
+    assert(to->size() >= from.size());
+    
+    T carry = detail::add_or_sub_assign_carry<detail::Additive_Mode::ADD>(to, from);
+    if(carry == 0)
+        return carry;
 
-    T* from_it = from.data;  
-    T* from_end = from.data + from.size; 
-    size_t add_to = min(from.size, to->size);
-
-    T* to_it = to->data;
-    T* to_end = to->data + to->size;
-
-    T next_carry = 0;
-
-    for (size_t i = 0; from_it < add_to; i++, from_it++, to_it++)
+    //iterate untill carry is exhausted 
+    for (size_t i = from.size(); i < to->size(); i++)
     {
-        T patched_from = *from_it + next_carry;
+        (*to)[i] += 1;
 
-        T curr_carry = 0;
-        //if overflowed by adding last carry set new carry
-        if(patched_from < *from_it)
-            curr_carry = 1;
-
-        //add the (patched) from word
-        *to_it += patched_from;
-
-        //set the next carry
-        if(*to_it < patched_from)
-            next_carry = 1;
-        else
-            next_carry = curr_carry;
+        if((*to)[i] != 0)
+        {
+            carry = 0;
+            break;
+        }
     }
 
-    //increment each word until carry is consumed
-    for (; next_carry != 0 && to_it != to_end; to_it++)
-    {
-        T before_increment = *to_it;
-        *to_it += carry;
+    return carry;
+}
 
-        if(*to_it < before_increment)
-            next_carry = 1;
-        else
-            next_carry = 0;
+
+template <integral T>
+func sub_assign_carry(span<T>* to, span<const T> from) -> T
+{
+    assert(to->size() >= from.size());
+
+    T carry = detail::add_or_sub_assign_carry<detail::Additive_Mode::SUB>(to, from);
+    if(carry == 0)
+        return carry;
+
+    //iterate untill carry is exhausted 
+    for (size_t i = from.size(); i < to->size(); i++)
+    {
+        //if wont underflow
+        if((*to)[i] != 0)
+        {
+            (*to)[i] -= 1;
+            carry = 0;
+            break;
+        }
+
+        (*to)[i] -= 1;
     }
 
     return carry;
@@ -770,73 +838,329 @@ func zeros_from_index(span<T> num) -> span<T>
     return to + 1;
 }
 
-template <integral T>
-func sub_assign_carry(span<T>* to, span<const T> from) -> T
-{
-    assert(to->size() >= from.size());
-
-    size_t min_size = min(to->size(), from.size());
-    constexpr T type_max = std::numeric_limits<T>::max();
-
-    mut pos1 = to->begin();
-    mut pos2 = from.begin();
-    mut to_end = to->end();
-    mut from_end = from.end();
-
-    size_t i = 0;
-    T borrow = 0;
-
-    for(; i < min_size; i++, pos1++, pos2++)
-    {
-        *pos1 -= borrow;
-        //if undeflowed as a result of borrow
-        if(*pos1 == type_max)
-            borrow = 1;
-
-        //always substarcts the bigger from the smaller 
-        // and in the case its negative modulates and sets borrow
-        if(*pos1 > *pos2)
-            *pos1 -= *pos2;
-        else
-        {
-            borrow = 1;
-            *pos1 = type_max - (*pos2 - *pos1);
-        }
-    }
-
-    if(borrow != 0)
-    {
-        for(; pos1 != to_end; pos1++)
-        {
-            if(pos1 == 0)
-                pos1 = type_max
-            else
-            {
-                pos1 -= 1;
-                borrow = 0;
-            }
-        }
-    }
-
-    return borrow;
-}
+#include <ctime>
+#include <cstdlib>
+#include <cmath>
+#include <chrono>
 
 template <BIG_INT_TEMPL>
 runtime_proc print_digits(Big_Int_T const& num)
 {
     for(let word : num)
-        std::cout << word;
+        std::cout << cast(u64) word;
 }
 
 
+template <typename Fn, typename To = void>
+concept thunk = requires(Fn fn)
+{
+    { fn() } -> std::convertible_to<To>;
+};
+
+
+
+
+#if defined(__GNUC__)
+    #define PERF_UNUSED __attribute__((unused))
+    #define ALWAYS_INLINE __attribute__((always_inline))
+    #define inline_assembly asm
+#elif defined(_MSC_VER) && !defined(__clang__)
+    #define PERF_UNUSED
+    #define ALWAYS_INLINE __forceinline
+    #define inline_assembly __asm
+#else
+    #define PERF_UNUSED
+    #define ALWAYS_INLINE
+    #define inline_assembly asm
+#endif
+
+
+inline ALWAYS_INLINE proc no_optim(void* value) -> void 
+{
+    if(!std::is_constant_evaluated())
+    {
+        // Clang doesn't like the 'X' constraint on `value` and certain GCC versions
+        // don't like the 'g' constraint. Attempt to placate them both.
+        /*#if defined(__clang__)
+        inline_assembly volatile("" : : "g"(value) : "memory");
+        #else
+        inline_assembly volatile("" : : "i,r,m"(value) : "memory");
+        #endif*/
+    }
+}
+// Force the compiler to flush pending writes to global memory. Acts as an
+// effective read/write barrier
+inline ALWAYS_INLINE proc flush_writes() -> void {
+
+    /*if(!std::is_constant_evaluated())
+    {
+        inline_assembly volatile("" : : : "memory");
+    }*/
+}
+
+
+
+template <thunk Fn>
+func ellapsed_time(Fn fn) -> u64
+{
+    using std::chrono::high_resolution_clock;
+    using std::chrono::duration_cast;
+    using std::chrono::duration;
+    using std::chrono::milliseconds;
+
+    let t1 = high_resolution_clock::now();
+    fn();
+    let t2 = high_resolution_clock::now();
+    return duration_cast<milliseconds>(t2 - t1).count();
+}
+
+
+
+template <typename Fn>
+func benchmark_iters(size_t ms, size_t warm_up_ms, Fn fn, size_t block_size = 1) -> size_t
+{
+    using std::chrono::high_resolution_clock;
+    using std::chrono::duration_cast;
+    using std::chrono::duration;
+    using std::chrono::milliseconds;
+
+    let clock = [](){ 
+        return high_resolution_clock::now(); 
+    };
+    let diff = [](auto t1, auto t2){ 
+        return duration_cast<milliseconds>(t2 - t1).count(); 
+    };
+
+    size_t total_ms = ms + warm_up_ms;
+    size_t iters = 0;
+    let start = clock();
+
+    while(true)
+    {
+        for(size_t i = 0; i < block_size; i++)
+            fn();
+
+        let elapsed = cast(size_t) diff(start, clock());
+        if(elapsed > warm_up_ms)
+            iters += block_size;
+        if(elapsed > total_ms)
+            break;
+    }
+
+    return iters;
+}
+
+struct benchmark_result
+{
+    size_t iters;
+    size_t time;
+};
+
+template <typename Fn>
+func benchmark_iters2(size_t min_time, size_t max_time, Fn fn) -> double
+{
+    using std::chrono::high_resolution_clock;
+    using std::chrono::duration_cast;
+    using std::chrono::duration;
+    using std::chrono::milliseconds;
+
+    let clock = [](){ 
+        return high_resolution_clock::now(); 
+    };
+    let diff = [](auto t1, auto t2){ 
+        return duration_cast<milliseconds>(t2 - t1).count(); 
+    };
+
+    enum class Stage
+    {
+        Initial,
+        Blocked
+    };
+
+    constexpr double acceptable_delta_ratio = 0.01;
+    constexpr double perfect_delta_ratio = 0.01;
+    constexpr size_t enough_samples = 50;
+    constexpr size_t history_len = 8;
+    double block_times[history_len + 1] = {0};
+    double block_diffs_[history_len + 1] = {0.0};
+    double* block_diffs = block_diffs_ + 1;
+
+    size_t block_index = 0;
+
+    size_t time_per_block = 50;
+    //size_t total_ms = ms + warm_up_ms;
+    size_t iters = 0;
+    size_t samples = 0;
+    size_t last_iters = 0;
+    size_t block_size = 1;
+    size_t to_time = min_time;
+    Stage stage = Stage::Initial;
+
+
+    size_t reported_iters = 0;
+    double reported_time = 0;
+    double max_diff = 0;
+
+    let start = clock();
+    mut last = start;
+    double time_per_iter = 0.0;
+
+    while(true)
+    {
+        for(size_t i = 0; i < block_size; i++)
+            fn();
+
+        iters += block_size;
+
+        let now = clock();
+        let ellapsed = cast(size_t) diff(start, now);
+        if(ellapsed > to_time)
+        {
+            if(ellapsed > max_time)
+                break;
+
+            if(stage == Stage::Initial)
+            {
+                time_per_iter = cast(double) ellapsed / iters;
+                //let expected_iters = optimal_time * iters / ellapsed; //== optimal_time / time_per iter
+                block_size = time_per_block * iters / ellapsed; // == time_per_block / time_per_iter;
+                
+                stage = Stage::Blocked;
+                to_time = time_per_block;
+            }
+            else
+            {
+                double current_iter_time = cast(double) diff(last, now);
+                size_t current_iter_count = iters - last_iters;
+
+                size_t prev_index = block_index % history_len;
+                size_t curr_index = prev_index + 1;
+
+                block_times[curr_index] = current_iter_time;
+                double delta = block_times[curr_index] - block_times[prev_index];
+                double delta2 = delta * delta;
+                block_diffs[curr_index] = delta * delta;
+                double max = 0;
+
+                if(delta2 > max)
+                    max = delta2;
+                    
+
+                block_index ++;
+                
+                if(block_index > history_len - 1)
+                {
+                    double max_delta2 = 0;
+                    for(size_t i = 0; i < history_len - 1; i++)
+                    {
+                        double delta = block_times[i] - block_times[i+1];
+                        double delta2 = delta * delta;
+                        if(delta2 > max_delta2)
+                            max_delta2 = delta2;
+                    }
+
+
+                    double normalized_delta = max_delta2 / (current_iter_time * current_iter_time);
+                    if(normalized_delta < acceptable_delta_ratio)
+                    {
+                        reported_iters += current_iter_count;
+                        reported_time += current_iter_time;
+                        samples++;
+                    }
+
+                    if(samples > enough_samples)
+                        break;
+                    //if(normalized_delta < perfect_delta_ratio)
+                        //break;
+                }
+            }
+
+            //last = now;
+            last = clock();
+            last_iters = iters;
+        }
+    }
+
+    if(reported_iters == 0)
+    {
+        reported_iters = iters;
+        reported_time = cast(size_t) diff(start, clock());
+    }
+
+    std::cout << "total_time: " << diff(start, clock()) << "\n";
+
+    return cast(double) reported_time / cast(double) reported_iters;
+    //return benchmark_result{reported_iters, cast(size_t) reported_time};
+}
+
+double run_test()
+{
+    using Big_Int = Big_Int_<u64>;
+    constexpr size_t MIN_NUM_SIZE = 10000;
+    constexpr size_t MAX_NUM_SIZE = 10000;
+    constexpr size_t NUM_COUNT = 20;
+    constexpr size_t WARM_ITERS = 100;
+    constexpr size_t ITERS = 1000'0;
+
+    let gen_random = [](size_t min_num_size, size_t max_num_size) -> Big_Int {
+        size_t size = min(max_num_size, max(min_num_size, rand()));
+
+        Big_Int gened;
+        resize(&gened, size);
+        for(size_t i = 0; i < size; i++)
+        {
+            const u64 r = rand();
+            gened[i] = r | (r >> 16) | (r >> 32) | (r >> 48);
+        }
+
+        return gened;
+    };
+
+    Big_Int to = gen_random(MAX_NUM_SIZE, MAX_NUM_SIZE);
+    Big_Int nums[NUM_COUNT];
+    for(size_t i = 0; i < NUM_COUNT; i++)
+        nums[i] = gen_random(MIN_NUM_SIZE, MAX_NUM_SIZE);
+
+    let lambda = [&]{
+        span<u64> to_s = to;
+        for(size_t i = 0; i < NUM_COUNT; i++)
+        {
+            span<const u64> num_s = nums[i];
+            cast(void) add_assign_carry(&to_s, num_s);
+        }
+    };
+
+    //std::cout << "iters:" << benchmark_iters(1000, 2000, lambda, 10) << " \n";
+    //std::cout << "iters:" << benchmark_iters(1000, 1000, lambda, 10) << " \n";
+    //std::cout << "iters:" << benchmark_iters(1000, 500, lambda, 10) << " \n";
+    //std::cout << "iters:" << benchmark_iters(1000, 100, lambda, 10) << " \n";
+    //std::cout << "iters:" << benchmark_iters(1000, 100, lambda, 10) << " \n";
+
+    std::cout << "iters:" << benchmark_iters2(100, 1000000, lambda) << " \n";
+    std::cout << "iters:" << benchmark_iters2(100, 1000000, lambda) << " \n";
+    std::cout << "iters:" << benchmark_iters2(100, 1000000, lambda) << " \n";
+    std::cout << "iters:" << benchmark_iters2(100, 1000000, lambda) << " \n";
+
+
+    return 1.0;
+}
+
 int main()
 {
-    Big_Int_<u64> num1 = 7;
-    Big_Int_<u64> num2 = 7;
+    Big_Int_<u8> num1 = 0xFF;
+    Big_Int_<u8> num2 = 0xA2;
 
-    //let res = add(num1, num2);
-    //print_digits(res);
+    constexpr int res1 = 0xFF + 0xA2;
+    constexpr int res2 = 0x1b1;
+
+
+    resize(&num1, 2);
+    
+    span<u8> num1_s = num1;
+    span<const u8> num2_s = num2;
     int a = 5;
+
+    run_test();
 
     std::cout << "\nOK\n";
 }

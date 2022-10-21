@@ -1,2 +1,8 @@
 ﻿  arbitrary_precision.cpp
-  arbitrary_precision.vcxproj -> D:\saves\programming\arbitrary_precision\x64\Debug\arbitrary_precision.exe
+D:\Saves\Programming\arbitrary_precision\arbitrary_precision.cpp(1071,42): warning C4244: '=': conversion from 'size_t' to 'double', possible loss of data
+D:\Saves\Programming\arbitrary_precision\arbitrary_precision.cpp(1123): message : see reference to function template instantiation 'double benchmark_iters2<run_test::<lambda_2>>(size_t,size_t,Fn)' being compiled
+          with
+          [
+              Fn=run_test::<lambda_2>
+          ]
+  arbitrary_precision.vcxproj -> D:\Saves\Programming\arbitrary_precision\x64\Debug\arbitrary_precision.exe
