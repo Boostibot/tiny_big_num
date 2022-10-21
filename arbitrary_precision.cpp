@@ -18,7 +18,6 @@
 
 #define cast(...) (__VA_ARGS__)
 #define transmute(...) *cast(__VA_ARGS__*) cast(void*) &
-#define maybe_unused [[maybe_unused]] 		
 #define address_alias [[no_unique_address]]
 
 using u8 = std::uint8_t;
@@ -954,6 +953,13 @@ struct benchmark_result
 {
     size_t iters;
     size_t time;
+
+    size_t total_real_time;  
+    size_t total_time;  
+    size_t total_iters;  
+    
+    double iters_per_ms;
+    double ms_per_iter;
 };
 
 template <typename Fn>
@@ -968,31 +974,52 @@ func benchmark_iters2(size_t min_time, size_t max_time, Fn fn) -> double
         return high_resolution_clock::now(); 
     };
     let diff = [](auto t1, auto t2){ 
-        return duration_cast<milliseconds>(t2 - t1).count(); 
+        return cast(size_t) duration_cast<milliseconds>(t2 - t1).count(); 
+    };
+    let time_per_iter = [](size_t time, size_t iters){
+        return cast(double) time / iters;
     };
 
     enum class Stage
     {
         Initial,
-        Blocked
+        Blocked,
+        Gather
     };
 
     constexpr double acceptable_delta_ratio = 0.01;
-    constexpr double perfect_delta_ratio = 0.01;
+    constexpr double inacceptable_delta_ratio = 0.8;
+    constexpr double average_damping = 0.999; //to counteract errors
     constexpr size_t enough_samples = 50;
-    constexpr size_t history_len = 8;
-    double block_times[history_len + 1] = {0};
-    double block_diffs_[history_len + 1] = {0.0};
+    constexpr size_t max_history_size = 16;
+    constexpr size_t block_size_increase = 14;
+    constexpr size_t block_size_increase_den = 10;
+    constexpr size_t stable_position_after = 20;
+
+    size_t optimal_time = 2000;
+    size_t history_size = 4;
+    size_t block_size = 1;
+
+    double block_times[max_history_size] = {0.0};
+    double block_diffs_[max_history_size + 1] = {0.0};
     double* block_diffs = block_diffs_ + 1;
 
-    size_t block_index = 0;
+    //sets to very high number => unless the whole history is filled
+    // the current sample wont get added
+    for(size_t i = 0; i < max_history_size; i++)
+        block_times[i] = 1e100;
 
+    size_t block_index = 0;
+    size_t prev_index = 0;
+    double prev_time = 0.0;
+
+    //size_t time_per_block = optimal_time / enough_samples;
     size_t time_per_block = 50;
-    //size_t total_ms = ms + warm_up_ms;
     size_t iters = 0;
-    size_t samples = 0;
+    size_t accepted_samples = 0;
+    size_t total_samples = 0;
+    size_t accepted_in_row = 0;
     size_t last_iters = 0;
-    size_t block_size = 1;
     size_t to_time = min_time;
     Stage stage = Stage::Initial;
 
@@ -1000,10 +1027,12 @@ func benchmark_iters2(size_t min_time, size_t max_time, Fn fn) -> double
     size_t reported_iters = 0;
     double reported_time = 0;
     double max_diff = 0;
+    double running_average_delta = 0;
+    //double running_average_time = 0;
 
     let start = clock();
+    mut period_start = start;
     mut last = start;
-    double time_per_iter = 0.0;
 
     while(true)
     {
@@ -1013,7 +1042,7 @@ func benchmark_iters2(size_t min_time, size_t max_time, Fn fn) -> double
         iters += block_size;
 
         let now = clock();
-        let ellapsed = cast(size_t) diff(start, now);
+        size_t ellapsed = diff(period_start, now);
         if(ellapsed > to_time)
         {
             if(ellapsed > max_time)
@@ -1021,60 +1050,80 @@ func benchmark_iters2(size_t min_time, size_t max_time, Fn fn) -> double
 
             if(stage == Stage::Initial)
             {
-                time_per_iter = cast(double) ellapsed / iters;
                 //let expected_iters = optimal_time * iters / ellapsed; //== optimal_time / time_per iter
                 block_size = time_per_block * iters / ellapsed; // == time_per_block / time_per_iter;
                 
                 stage = Stage::Blocked;
                 to_time = time_per_block;
             }
-            else
-            {
-                double current_iter_time = cast(double) diff(last, now);
+            else if(stage == Stage::Blocked)
+            {               
+                //if varience too high => increase block size
+                //if too many blocks => history ++
+                //if too little blocks => history --
+                //time_per_block?
+
+                size_t current_iter_time = diff(last, now);
                 size_t current_iter_count = iters - last_iters;
+                size_t curr_index = block_index % max_history_size;
+                size_t removed_history_index = (block_index + 1) % max_history_size;
 
-                size_t prev_index = block_index % history_len;
-                size_t curr_index = prev_index + 1;
-
-                block_times[curr_index] = current_iter_time;
-                double delta = block_times[curr_index] - block_times[prev_index];
-                double delta2 = delta * delta;
-                block_diffs[curr_index] = delta * delta;
-                double max = 0;
-
-                if(delta2 > max)
-                    max = delta2;
-                    
-
-                block_index ++;
+                double curr_time = time_per_iter(current_iter_time, current_iter_count);
+                double curr_time2 = curr_time * curr_time;
                 
-                if(block_index > history_len - 1)
+                
+                //double prev_time = block_times[prev_index];
+                double delta = prev_time - curr_time;
+                double delta2 = delta * delta;
+                double removed_delta2 = block_diffs[removed_history_index];
+
+                block_times[curr_index] = curr_time2;
+                block_diffs[curr_index] = delta2;
+                if(block_index < history_size)
+                    running_average_delta += curr_time2;
+                else
                 {
-                    double max_delta2 = 0;
-                    for(size_t i = 0; i < history_len - 1; i++)
-                    {
-                        double delta = block_times[i] - block_times[i+1];
-                        double delta2 = delta * delta;
-                        if(delta2 > max_delta2)
-                            max_delta2 = delta2;
-                    }
+                    running_average_delta = (running_average_delta - removed_delta2) * average_damping + delta2;
 
-
-                    double normalized_delta = max_delta2 / (current_iter_time * current_iter_time);
-                    if(normalized_delta < acceptable_delta_ratio)
+                    double acceptable = acceptable_delta_ratio * curr_time2;
+                    double inacceptable = inacceptable_delta_ratio * curr_time2;
+                    if(running_average_delta < acceptable)
                     {
                         reported_iters += current_iter_count;
                         reported_time += current_iter_time;
-                        samples++;
-                    }
 
-                    if(samples > enough_samples)
-                        break;
-                    //if(normalized_delta < perfect_delta_ratio)
-                        //break;
+                        if(accepted_in_row > stable_position_after)
+                            stage = Stage::Gather;
+
+                        accepted_samples++;
+                        accepted_in_row++;
+                    }
+                    else
+                    {
+                        block_size = block_size * block_size_increase / block_size_increase_den;
+                        accepted_in_row = 0;
+                    }
                 }
+
+                //size_t remaining = optimal_time - ellapsed;
+                //size_t blocks_left = remaining / current_iter_time;
+
+                prev_index = curr_index;
+                prev_time = curr_time;
+                block_index ++;
+                total_samples++;
+            }
+            else if(stage == Stage::Gather)
+            {
+                reported_iters += diff(last, now);
+                reported_time += iters - last_iters;
+                accepted_samples++;
             }
 
+            if(accepted_samples > enough_samples)
+                break;
+
+            total_samples++;
             //last = now;
             last = clock();
             last_iters = iters;
