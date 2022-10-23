@@ -1159,33 +1159,41 @@ func benchmark(size_t optimal_time, size_t min_time, size_t max_time, size_t opt
                     reported_time += current_iter_time;
                     accepted_samples++;
 
+                    //@TODO: Remove min & max and replace with history_damping += (approaching_value - history_damping) * damping
+                    //        such equation can never exceed the value and if it increases it automatically auto corrects itself
+                    // 
+                    //@TODO: Figure out a way to remove some of the outer ifs: We can change the ellapsed > max into a stage 
+                    //         We could also remove the big condition (since it has just about 50% random chance of suceeding => many misspredictions)
+                    //         And make two constants one for on off (0 or ~0) to be and for integers and then one double approached by both delta and history
+                    //         (We can offset and strach the two intervals afterwards) this will also most importantly reduce code size
+                    //@TODO: Test performance of all three changes
                     //harden requirements for delta and increase history size => less blocks will get accepted
-                    if(DO_DELTA_CHANGE)
+                    if constexpr (DO_DELTA_CHANGE)
                         required_delta *= constants.delta_hardening_grow;;
-                    if(DO_HISTORY_CHANGE)
+                    if constexpr (DO_HISTORY_CHANGE)
                         history_damping = min(history_damping * constants.history_hardening_grow, constants.history_max);
                 }
                 else
                 {
                     //soften requirements for delta and decrease history size => more blocks will get accepted
-                    if(DO_DELTA_CHANGE)
+                    if constexpr (DO_DELTA_CHANGE)
                         required_delta = min(required_delta * constants.delta_softening_grow, constants.delta_max);
-                    if(DO_HISTORY_CHANGE)
+                    if constexpr (DO_HISTORY_CHANGE)
                         history_damping = max(history_damping * constants.history_softening_grow, constants.history_min);
                 }
 
                 //update constants and track stats
-                if(DO_HISTORY_CHANGE)
+                if constexpr (DO_HISTORY_CHANGE)
                     history_size = sum_geometrict_series(history_damping);
 
-                if(DO_HISTORY_CHANGE && DO_STATS)
+                if constexpr (DO_HISTORY_CHANGE && DO_STATS)
                 {
                     history_size_running_sum += history_size;
                     history_size_highwater_mark = max(history_size_highwater_mark, history_size);
                     history_size_lowwater_mark = min(history_size_lowwater_mark, history_size, 0);
                 }
 
-                if(DO_DELTA_CHANGE && DO_STATS)
+                if constexpr (DO_DELTA_CHANGE && DO_STATS)
                 {
                     delta_running_sum += required_delta;
                     delta_highwater_mark = max(delta_highwater_mark, required_delta);
