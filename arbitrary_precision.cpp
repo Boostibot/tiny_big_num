@@ -962,87 +962,162 @@ struct benchmark_result
     double ms_per_iter;
 };
 
-template <typename Fn>
-func benchmark_iters2(size_t min_time, size_t max_time, Fn fn) -> double
+
+template <typename T>
+func clamp(T value, no_infer(T) low, no_infer(T) high) -> T
+{
+    if(value < low)
+        return low;
+    if(value > high)
+        return high;
+    return value;
+}
+
+struct Benchmark_Constants
+{
+    size_t optimal_samples = 100;
+    size_t base_block_size = 10;
+    double base_history = 0.9;
+    double base_delta = 0.01;
+    double history_softening_grow = 0.9;
+    double history_hardening_grow = 1.2;
+    double delta_softening_grow = 1.05;
+    double delta_hardening_grow = 0.90;
+    double history_min = 0.7;
+    double history_max = 0.999;
+    double delta_max = 0.15;
+};
+
+struct Benchmark_Stats
+{
+    double history_size;
+    double avg_history_size;
+    double max_history_size;
+    double min_history_size;
+
+    double delta;
+    double avg_delta;
+    double max_delta;
+    double min_delta;
+};
+
+struct Benchmark_Results
+{
+    size_t total_real_time;  
+    size_t total_time;  
+    size_t total_iters;  
+
+    size_t block_size;
+    size_t total_samples;
+    size_t accepted_samples;
+
+    size_t iters;
+    size_t time;
+
+    double iters_per_ms;
+    double ms_per_iter;
+};
+
+
+struct Benchmark_Combined_Results
+{
+    Benchmark_Results results;
+    Benchmark_Stats stats;
+};
+
+
+template <bool DO_STATS = false, thunk Fn = int(*)()>
+func benchmark(size_t optimal_time, size_t min_time, size_t max_time, size_t optimal_samples, Fn fn, Benchmark_Constants constants) -> std::conditional_t<DO_STATS, Benchmark_Combined_Results, Benchmark_Results>
 {
     using std::chrono::high_resolution_clock;
     using std::chrono::duration_cast;
     using std::chrono::duration;
-    using std::chrono::milliseconds;
+    using std::chrono::nanoseconds;
+
+    min_time *= 1000'000;
+    max_time *= 1000'000;
+    optimal_time *= 1000'000;
 
     let clock = [](){ 
         return high_resolution_clock::now(); 
     };
     let diff = [](auto t1, auto t2){ 
-        return cast(size_t) duration_cast<milliseconds>(t2 - t1).count(); 
+        return cast(size_t) duration_cast<nanoseconds>(t2 - t1).count(); 
     };
+
     let time_per_iter = [](size_t time, size_t iters){
         return cast(double) time / iters;
+    };
+
+    let diff2 = [](double last, double curr){
+        double delta = last - curr;
+        return delta * delta;
+    };
+
+    let sum_geometrict_series = [](double damping){
+        return 1.0 / (1.0 - damping);
     };
 
     enum class Stage
     {
         Initial,
         Blocked,
-        Gather
     };
 
-    constexpr double acceptable_delta_ratio = 0.01;
-    constexpr double inacceptable_delta_ratio = 0.8;
-    constexpr double average_damping = 0.999; //to counteract errors
-    constexpr size_t enough_samples = 50;
-    constexpr size_t max_history_size = 16;
-    constexpr size_t block_size_increase = 14;
-    constexpr size_t block_size_increase_den = 10;
-    constexpr size_t stable_position_after = 20;
+    constexpr bool DO_HISTORY_CHANGE = true;
+    constexpr bool DO_DELTA_CHANGE = true;
 
-    size_t optimal_time = 2000;
-    size_t history_size = 4;
+    double required_delta = constants.base_delta;
+    double history_damping = constants.base_history;
+    double history_size = sum_geometrict_series(history_damping);
+
+    double history_size_highwater_mark = 0.0;
+    double history_size_lowwater_mark = 999999;
+    double history_size_running_sum = 0;
+    double delta_highwater_mark = 0.0;
+    double delta_lowwater_mark = 999999;
+    double delta_running_sum = 0;
+
     size_t block_size = 1;
-
-    double block_times[max_history_size] = {0.0};
-    double block_diffs_[max_history_size + 1] = {0.0};
-    double* block_diffs = block_diffs_ + 1;
-
-    //sets to very high number => unless the whole history is filled
-    // the current sample wont get added
-    for(size_t i = 0; i < max_history_size; i++)
-        block_times[i] = 1e100;
-
-    size_t block_index = 0;
-    size_t prev_index = 0;
-    double prev_time = 0.0;
-
-    //size_t time_per_block = optimal_time / enough_samples;
-    size_t time_per_block = 50;
-    size_t iters = 0;
+    size_t total_iters = 0;
+    size_t total_time = 0;
     size_t accepted_samples = 0;
     size_t total_samples = 0;
-    size_t accepted_in_row = 0;
     size_t last_iters = 0;
     size_t to_time = min_time;
     Stage stage = Stage::Initial;
 
-
     size_t reported_iters = 0;
-    double reported_time = 0;
-    double max_diff = 0;
+    size_t reported_time = 0;
     double running_average_delta = 0;
-    //double running_average_time = 0;
+    double prev_time = 0.0;
 
     let start = clock();
-    mut period_start = start;
     mut last = start;
+
+    //Algorhitm:
+    // (1) Run the given function untill min_time: This will lets us calculate block size 
+    //     (ammount of times to run the function in sequence counting as a single sample)
+    // 
+    // (2) Run block and check its runtime difference against previous run. 
+    //     If the difference is under some delta we add the sample and make the delta smaller
+    //     If the difference is over delta we ignore the sample and increase delta 
+    //     We also add the curren difference into the running_average_delta and damp it by history_damping
+    //       so that we have sample to check the next runs against.
+    //     We also vary ammount of damping of the running_average_delta (history) which lets us control how
+    //       far into the past we are considering results. This is important for functions with big variations in runtime.
+    //     
+    // (3) We report back the obtained data and statistics
 
     while(true)
     {
         for(size_t i = 0; i < block_size; i++)
             fn();
 
-        iters += block_size;
+        total_iters += block_size;
 
         let now = clock();
-        size_t ellapsed = diff(period_start, now);
+        const size_t ellapsed = diff(start, now);
         if(ellapsed > to_time)
         {
             if(ellapsed > max_time)
@@ -1050,96 +1125,148 @@ func benchmark_iters2(size_t min_time, size_t max_time, Fn fn) -> double
 
             if(stage == Stage::Initial)
             {
-                //let expected_iters = optimal_time * iters / ellapsed; //== optimal_time / time_per iter
-                block_size = time_per_block * iters / ellapsed; // == time_per_block / time_per_iter;
-                
+                total_time += ellapsed;
+                if(optimal_time > ellapsed)
+                {
+                    block_size = total_iters * (optimal_time - ellapsed) / (ellapsed * optimal_samples);
+                    block_size = max(block_size, 1);
+                }
+                else
+                    block_size = 1;
+
+                to_time = 0;
                 stage = Stage::Blocked;
-                to_time = time_per_block;
             }
             else if(stage == Stage::Blocked)
-            {               
-                //if varience too high => increase block size
-                //if too many blocks => history ++
-                //if too little blocks => history --
-                //time_per_block?
+            {   
+                //calculate the current block stats
+                const size_t current_iter_time = diff(last, now);
+                const size_t current_iter_count = total_iters - last_iters;
 
-                size_t current_iter_time = diff(last, now);
-                size_t current_iter_count = iters - last_iters;
-                size_t curr_index = block_index % max_history_size;
-                size_t removed_history_index = (block_index + 1) % max_history_size;
+                //calculate delta squared against the last block
+                const double curr_time = time_per_iter(current_iter_time, current_iter_count);
+                const double delta2 = diff2(prev_time, curr_time);
+                const double curr_time2 = curr_time * curr_time;
 
-                double curr_time = time_per_iter(current_iter_time, current_iter_count);
-                double curr_time2 = curr_time * curr_time;
-                
-                
-                //double prev_time = block_times[prev_index];
-                double delta = prev_time - curr_time;
-                double delta2 = delta * delta;
-                double removed_delta2 = block_diffs[removed_history_index];
+                running_average_delta *= history_damping;
+                running_average_delta += delta2;
 
-                block_times[curr_index] = curr_time2;
-                block_diffs[curr_index] = delta2;
-                if(block_index < history_size)
-                    running_average_delta += curr_time2;
+                //if delta is in required range the block is added else is ignored
+                const double relative_average_delta = running_average_delta / (curr_time2 * history_size);
+                if(relative_average_delta < required_delta)
+                {
+                    reported_iters += current_iter_count;
+                    reported_time += current_iter_time;
+                    accepted_samples++;
+
+                    //harden requirements for delta and increase history size => less blocks will get accepted
+                    if(DO_DELTA_CHANGE)
+                        required_delta *= constants.delta_hardening_grow;;
+                    if(DO_HISTORY_CHANGE)
+                        history_damping = min(history_damping * constants.history_hardening_grow, constants.history_max);
+                }
                 else
                 {
-                    running_average_delta = (running_average_delta - removed_delta2) * average_damping + delta2;
-
-                    double acceptable = acceptable_delta_ratio * curr_time2;
-                    double inacceptable = inacceptable_delta_ratio * curr_time2;
-                    if(running_average_delta < acceptable)
-                    {
-                        reported_iters += current_iter_count;
-                        reported_time += current_iter_time;
-
-                        if(accepted_in_row > stable_position_after)
-                            stage = Stage::Gather;
-
-                        accepted_samples++;
-                        accepted_in_row++;
-                    }
-                    else
-                    {
-                        block_size = block_size * block_size_increase / block_size_increase_den;
-                        accepted_in_row = 0;
-                    }
+                    //soften requirements for delta and decrease history size => more blocks will get accepted
+                    if(DO_DELTA_CHANGE)
+                        required_delta = min(required_delta * constants.delta_softening_grow, constants.delta_max);
+                    if(DO_HISTORY_CHANGE)
+                        history_damping = max(history_damping * constants.history_softening_grow, constants.history_min);
                 }
 
-                //size_t remaining = optimal_time - ellapsed;
-                //size_t blocks_left = remaining / current_iter_time;
+                //update constants and track stats
+                if(DO_HISTORY_CHANGE)
+                    history_size = sum_geometrict_series(history_damping);
 
-                prev_index = curr_index;
+                if(DO_HISTORY_CHANGE && DO_STATS)
+                {
+                    history_size_running_sum += history_size;
+                    history_size_highwater_mark = max(history_size_highwater_mark, history_size);
+                    history_size_lowwater_mark = min(history_size_lowwater_mark, history_size, 0);
+                }
+
+                if(DO_DELTA_CHANGE && DO_STATS)
+                {
+                    delta_running_sum += required_delta;
+                    delta_highwater_mark = max(delta_highwater_mark, required_delta);
+                    delta_lowwater_mark = min(delta_lowwater_mark, required_delta, 0);
+                }
+
                 prev_time = curr_time;
-                block_index ++;
                 total_samples++;
-            }
-            else if(stage == Stage::Gather)
-            {
-                reported_iters += diff(last, now);
-                reported_time += iters - last_iters;
-                accepted_samples++;
+                total_time += current_iter_time;
             }
 
-            if(accepted_samples > enough_samples)
-                break;
-
-            total_samples++;
-            //last = now;
             last = clock();
-            last_iters = iters;
+            last_iters = total_iters;
         }
     }
 
     if(reported_iters == 0)
     {
-        reported_iters = iters;
+        reported_iters = total_iters;
         reported_time = cast(size_t) diff(start, clock());
     }
 
-    std::cout << "total_time: " << diff(start, clock()) << "\n";
+    const double iters_per_ms = cast(double) reported_iters * 1'000'000 / cast(double) reported_time;
+    const size_t total_real_time = diff(start, clock());
 
-    return cast(double) reported_time / cast(double) reported_iters;
-    //return benchmark_result{reported_iters, cast(size_t) reported_time};
+    let reuslts = Benchmark_Results{
+
+        .total_real_time = total_real_time / 1000'000,  
+        .total_time = total_time,  
+        .total_iters = total_iters,  
+
+        .block_size = block_size,
+        .total_samples = total_samples,
+        .accepted_samples = accepted_samples,
+
+        .iters = reported_iters,
+        .time = reported_time / 1000'000,
+
+        .iters_per_ms = iters_per_ms,
+        .ms_per_iter = 1 / iters_per_ms,
+    }; 
+
+    if constexpr (DO_STATS)
+    {
+        let stats = Benchmark_Stats{
+            .history_size = history_size,
+            .avg_history_size = history_size_running_sum / total_samples,
+            .max_history_size = history_size_highwater_mark,
+            .min_history_size = history_size_lowwater_mark,
+
+            .delta = required_delta,
+            .avg_delta = delta_running_sum / total_samples,
+            .max_delta = delta_highwater_mark,
+            .min_delta = delta_lowwater_mark,
+
+        };
+
+        return Benchmark_Combined_Results{
+            .results = reuslts,
+            .stats = stats,
+        };
+    }
+    else
+        return reuslts;
+}
+
+
+template <thunk Fn>
+func benchmark(size_t optimal_time, Fn fn) -> Benchmark_Results
+{
+    Benchmark_Constants constants;
+    return benchmark<false>(optimal_time, optimal_time / 8, optimal_time, constants.optimal_samples, fn, constants);
+}
+
+template <thunk Fn>
+func benchmark(size_t optimal_time, Benchmark_Stats* stats, Fn fn) -> Benchmark_Results
+{
+    Benchmark_Constants constants;
+    let combined = benchmark<true>(optimal_time, optimal_time / 8, optimal_time, constants.optimal_samples, fn, constants);
+    stats = combined.stats;
+    return combined.results;
 }
 
 double run_test()
@@ -1159,7 +1286,7 @@ double run_test()
         for(size_t i = 0; i < size; i++)
         {
             const u64 r = rand();
-            gened[i] = r | (r >> 16) | (r >> 32) | (r >> 48);
+            gened[i] = r ^ (r >> 16) ^ (r >> 32) ^ (r >> 48);
         }
 
         return gened;
@@ -1179,17 +1306,39 @@ double run_test()
         }
     };
 
-    //std::cout << "iters:" << benchmark_iters(1000, 2000, lambda, 10) << " \n";
-    //std::cout << "iters:" << benchmark_iters(1000, 1000, lambda, 10) << " \n";
-    //std::cout << "iters:" << benchmark_iters(1000, 500, lambda, 10) << " \n";
-    //std::cout << "iters:" << benchmark_iters(1000, 100, lambda, 10) << " \n";
-    //std::cout << "iters:" << benchmark_iters(1000, 100, lambda, 10) << " \n";
 
-    std::cout << "iters:" << benchmark_iters2(100, 1000000, lambda) << " \n";
-    std::cout << "iters:" << benchmark_iters2(100, 1000000, lambda) << " \n";
-    std::cout << "iters:" << benchmark_iters2(100, 1000000, lambda) << " \n";
-    std::cout << "iters:" << benchmark_iters2(100, 1000000, lambda) << " \n";
+    i64 val1 = 1;
+    i64 val2 = 3;
+    i64 iter = 0;
+    let lambda2 = [&]{
+        int count = rand() % 1000 * 1000;
+        //int count = 1000;
+        for(int i = 0; i < count; i++)
+        {
+            val1 = 3*val2 + 2;
+            val2 = val1/3 + 1;
+            iter++;
+        }
+    };
 
+
+    std::cout << "NEW:" << std::endl;
+
+    std::cout << benchmark(2000, lambda).iters_per_ms << "\n";
+    std::cout << benchmark(2000, lambda).iters_per_ms << "\n";
+    std::cout << benchmark(2000, lambda).iters_per_ms << "\n";
+    std::cout << benchmark(2000, lambda).iters_per_ms << "\n";
+
+    std::cout << benchmark(1000, lambda2).iters_per_ms << "\n";
+    std::cout << benchmark(1000, lambda2).iters_per_ms << "\n";
+    std::cout << benchmark(1000, lambda2).iters_per_ms << "\n";
+    std::cout << benchmark(1000, lambda2).iters_per_ms << "\n";
+
+
+    std::cout << benchmark(1000, []{}).iters_per_ms << "\n";
+    std::cout << benchmark(1000, []{}).iters_per_ms << "\n";
+    std::cout << benchmark(1000, []{}).iters_per_ms << "\n";
+    std::cout << benchmark(1000, []{}).iters_per_ms << "\n";
 
     return 1.0;
 }
@@ -1211,5 +1360,5 @@ int main()
 
     run_test();
 
-    std::cout << "\nOK\n";
+    std::cout << "\nOK" << std::endl;
 }
