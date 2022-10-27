@@ -6,6 +6,9 @@
 #include <cassert>
 #include <span>
 #include <limits>
+#include <ranges>
+
+#include "benchmark.h"
 
 #define let const auto
 #define mut auto
@@ -849,433 +852,84 @@ runtime_proc print_digits(Big_Int_T const& num)
         std::cout << cast(u64) word;
 }
 
-
-template <typename Fn, typename To = void>
-concept thunk = requires(Fn fn)
+void print(Benchmark_Combined_Results const& combined)
 {
-    { fn() } -> std::convertible_to<To>;
+    auto reuslt = combined.results;
+    auto stats = combined.stats;
+    std::cout << std::endl;
+    std::cout << "total_time: " << reuslt.total_real_time / 1'000'000 << "\n";
+    std::cout << "ms_per_iter: " << reuslt.ms_per_iter << "\n";
+    std::cout << "time: " << reuslt.time/ 1'000'000  << "\n";
+    std::cout << "iters: " << reuslt.iters << "\n";
+    std::cout << "block_size: " << reuslt.block_size << "\n";
+    std::cout << "total_samples: " << reuslt.total_samples << "\n";
+    std::cout << "accepted_samples: " << reuslt.accepted_samples << "\n";
+    std::cout << "history_size: " << stats.history_size << "\n";
+    std::cout << "\tavg: " << stats.avg_history_size << "\n";
+    std::cout << "\tmax: " << stats.max_history_size << "\n";
+    std::cout << "\tmin: " << stats.min_history_size << "\n";
+    std::cout << "delta: " << stats.delta << "\n";
+    std::cout << "\tavg: " << stats.avg_delta << "\n";
+    std::cout << "\tmax: " << stats.max_delta << "\n";
+    std::cout << "\tmin: " << stats.min_delta << "\n";
+    std::cout << std::endl;
+}
+
+struct Distribution
+{
+    double mean = 0;
+    double deviation = 0;
+    double min = 0;
+    double max = 0;
+    u64 samples = 0;
 };
 
+constexpr double INF = std::numeric_limits<double>::infinity();
 
-
-
-#if defined(__GNUC__)
-    #define PERF_UNUSED __attribute__((unused))
-    #define ALWAYS_INLINE __attribute__((always_inline))
-    #define inline_assembly asm
-#elif defined(_MSC_VER) && !defined(__clang__)
-    #define PERF_UNUSED
-    #define ALWAYS_INLINE __forceinline
-    #define inline_assembly __asm
-#else
-    #define PERF_UNUSED
-    #define ALWAYS_INLINE
-    #define inline_assembly asm
-#endif
-
-
-inline ALWAYS_INLINE proc no_optim(void* value) -> void 
+template <std::ranges::forward_range R>
+func get_dsitribution(R const& range, auto selector)
 {
-    if(!std::is_constant_evaluated())
+    Distribution dist;
+    dist.max = -INF;
+    dist.min = INF;
+    dist.samples = std::ranges::size(range);
+    for(auto const& val : range)
+        dist.mean += cast(double) selector(val);
+
+    dist.mean /= dist.samples;
+    for(auto const& val : range)
     {
-        // Clang doesn't like the 'X' constraint on `value` and certain GCC versions
-        // don't like the 'g' constraint. Attempt to placate them both.
-        /*#if defined(__clang__)
-        inline_assembly volatile("" : : "g"(value) : "memory");
-        #else
-        inline_assembly volatile("" : : "i,r,m"(value) : "memory");
-        #endif*/
-    }
-}
-// Force the compiler to flush pending writes to global memory. Acts as an
-// effective read/write barrier
-inline ALWAYS_INLINE proc flush_writes() -> void {
+        auto selected = cast(double) selector(val);
+        auto diff = selected - dist.mean;
+        dist.deviation += diff * diff;
 
-    /*if(!std::is_constant_evaluated())
-    {
-        inline_assembly volatile("" : : : "memory");
-    }*/
-}
-
-
-
-template <thunk Fn>
-func ellapsed_time(Fn fn) -> u64
-{
-    using std::chrono::high_resolution_clock;
-    using std::chrono::duration_cast;
-    using std::chrono::duration;
-    using std::chrono::milliseconds;
-
-    let t1 = high_resolution_clock::now();
-    fn();
-    let t2 = high_resolution_clock::now();
-    return duration_cast<milliseconds>(t2 - t1).count();
-}
-
-
-
-template <typename Fn>
-func benchmark_iters(size_t ms, size_t warm_up_ms, Fn fn, size_t block_size = 1) -> size_t
-{
-    using std::chrono::high_resolution_clock;
-    using std::chrono::duration_cast;
-    using std::chrono::duration;
-    using std::chrono::milliseconds;
-
-    let clock = [](){ 
-        return high_resolution_clock::now(); 
-    };
-    let diff = [](auto t1, auto t2){ 
-        return duration_cast<milliseconds>(t2 - t1).count(); 
-    };
-
-    size_t total_ms = ms + warm_up_ms;
-    size_t iters = 0;
-    let start = clock();
-
-    while(true)
-    {
-        for(size_t i = 0; i < block_size; i++)
-            fn();
-
-        let elapsed = cast(size_t) diff(start, clock());
-        if(elapsed > warm_up_ms)
-            iters += block_size;
-        if(elapsed > total_ms)
-            break;
+        dist.max = max(selected, dist.max);
+        dist.min = min(selected, dist.min);
     }
 
-    return iters;
-}
-
-struct benchmark_result
-{
-    size_t iters;
-    size_t time;
-
-    size_t total_real_time;  
-    size_t total_time;  
-    size_t total_iters;  
-    
-    double iters_per_ms;
-    double ms_per_iter;
-};
-
-
-template <typename T>
-func clamp(T value, no_infer(T) low, no_infer(T) high) -> T
-{
-    if(value < low)
-        return low;
-    if(value > high)
-        return high;
-    return value;
-}
-
-struct Benchmark_Constants
-{
-    size_t optimal_samples = 100;
-    size_t base_block_size = 10;
-    double base_history = 0.9;
-    double base_delta = 0.01;
-    double history_softening_grow = 0.9;
-    double history_hardening_grow = 1.2;
-    double delta_softening_grow = 1.05;
-    double delta_hardening_grow = 0.90;
-    double history_min = 0.7;
-    double history_max = 0.999;
-    double delta_max = 0.15;
-};
-
-struct Benchmark_Stats
-{
-    double history_size;
-    double avg_history_size;
-    double max_history_size;
-    double min_history_size;
-
-    double delta;
-    double avg_delta;
-    double max_delta;
-    double min_delta;
-};
-
-struct Benchmark_Results
-{
-    size_t total_real_time;  
-    size_t total_time;  
-    size_t total_iters;  
-
-    size_t block_size;
-    size_t total_samples;
-    size_t accepted_samples;
-
-    size_t iters;
-    size_t time;
-
-    double iters_per_ms;
-    double ms_per_iter;
-};
-
-
-struct Benchmark_Combined_Results
-{
-    Benchmark_Results results;
-    Benchmark_Stats stats;
-};
-
-
-template <bool DO_STATS = false, thunk Fn = int(*)()>
-func benchmark(size_t optimal_time, size_t min_time, size_t max_time, size_t optimal_samples, Fn fn, Benchmark_Constants constants) -> std::conditional_t<DO_STATS, Benchmark_Combined_Results, Benchmark_Results>
-{
-    using std::chrono::high_resolution_clock;
-    using std::chrono::duration_cast;
-    using std::chrono::duration;
-    using std::chrono::nanoseconds;
-
-    min_time *= 1000'000;
-    max_time *= 1000'000;
-    optimal_time *= 1000'000;
-
-    let clock = [](){ 
-        return high_resolution_clock::now(); 
-    };
-    let diff = [](auto t1, auto t2){ 
-        return cast(size_t) duration_cast<nanoseconds>(t2 - t1).count(); 
-    };
-
-    let time_per_iter = [](size_t time, size_t iters){
-        return cast(double) time / iters;
-    };
-
-    let diff2 = [](double last, double curr){
-        double delta = last - curr;
-        return delta * delta;
-    };
-
-    let sum_geometrict_series = [](double damping){
-        return 1.0 / (1.0 - damping);
-    };
-
-    enum class Stage
-    {
-        Initial,
-        Blocked,
-    };
-
-    constexpr bool DO_HISTORY_CHANGE = true;
-    constexpr bool DO_DELTA_CHANGE = true;
-
-    double required_delta = constants.base_delta;
-    double history_damping = constants.base_history;
-    double history_size = sum_geometrict_series(history_damping);
-
-    double history_size_highwater_mark = 0.0;
-    double history_size_lowwater_mark = 999999;
-    double history_size_running_sum = 0;
-    double delta_highwater_mark = 0.0;
-    double delta_lowwater_mark = 999999;
-    double delta_running_sum = 0;
-
-    size_t block_size = 1;
-    size_t total_iters = 0;
-    size_t total_time = 0;
-    size_t accepted_samples = 0;
-    size_t total_samples = 0;
-    size_t last_iters = 0;
-    size_t to_time = min_time;
-    Stage stage = Stage::Initial;
-
-    size_t reported_iters = 0;
-    size_t reported_time = 0;
-    double running_average_delta = 0;
-    double prev_time = 0.0;
-
-    let start = clock();
-    mut last = start;
-
-    //Algorhitm:
-    // (1) Run the given function untill min_time: This will lets us calculate block size 
-    //     (ammount of times to run the function in sequence counting as a single sample)
-    // 
-    // (2) Run block and check its runtime difference against previous run. 
-    //     If the difference is under some delta we add the sample and make the delta smaller
-    //     If the difference is over delta we ignore the sample and increase delta 
-    //     We also add the curren difference into the running_average_delta and damp it by history_damping
-    //       so that we have sample to check the next runs against.
-    //     We also vary ammount of damping of the running_average_delta (history) which lets us control how
-    //       far into the past we are considering results. This is important for functions with big variations in runtime.
-    //     
-    // (3) We report back the obtained data and statistics
-
-    while(true)
-    {
-        for(size_t i = 0; i < block_size; i++)
-            fn();
-
-        total_iters += block_size;
-
-        let now = clock();
-        const size_t ellapsed = diff(start, now);
-        if(ellapsed > to_time)
-        {
-            if(ellapsed > max_time)
-                break;
-
-            if(stage == Stage::Initial)
-            {
-                total_time += ellapsed;
-                if(optimal_time > ellapsed)
-                {
-                    block_size = total_iters * (optimal_time - ellapsed) / (ellapsed * optimal_samples);
-                    block_size = max(block_size, 1);
-                }
-                else
-                    block_size = 1;
-
-                to_time = 0;
-                stage = Stage::Blocked;
-            }
-            else if(stage == Stage::Blocked)
-            {   
-                //calculate the current block stats
-                const size_t current_iter_time = diff(last, now);
-                const size_t current_iter_count = total_iters - last_iters;
-
-                //calculate delta squared against the last block
-                const double curr_time = time_per_iter(current_iter_time, current_iter_count);
-                const double delta2 = diff2(prev_time, curr_time);
-                const double curr_time2 = curr_time * curr_time;
-
-                running_average_delta *= history_damping;
-                running_average_delta += delta2;
-
-                //if delta is in required range the block is added else is ignored
-                const double relative_average_delta = running_average_delta / (curr_time2 * history_size);
-                if(relative_average_delta < required_delta)
-                {
-                    reported_iters += current_iter_count;
-                    reported_time += current_iter_time;
-                    accepted_samples++;
-
-                    //@TODO: Remove min & max and replace with history_damping += (approaching_value - history_damping) * damping
-                    //        such equation can never exceed the value and if it increases it automatically auto corrects itself
-                    // 
-                    //@TODO: Figure out a way to remove some of the outer ifs: We can change the ellapsed > max into a stage 
-                    //         We could also remove the big condition (since it has just about 50% random chance of suceeding => many misspredictions)
-                    //         And make two constants one for on off (0 or ~0) to be and for integers and then one double approached by both delta and history
-                    //         (We can offset and strach the two intervals afterwards) this will also most importantly reduce code size
-                    //@TODO: Test performance of all three changes
-                    //harden requirements for delta and increase history size => less blocks will get accepted
-                    if constexpr (DO_DELTA_CHANGE)
-                        required_delta *= constants.delta_hardening_grow;;
-                    if constexpr (DO_HISTORY_CHANGE)
-                        history_damping = min(history_damping * constants.history_hardening_grow, constants.history_max);
-                }
-                else
-                {
-                    //soften requirements for delta and decrease history size => more blocks will get accepted
-                    if constexpr (DO_DELTA_CHANGE)
-                        required_delta = min(required_delta * constants.delta_softening_grow, constants.delta_max);
-                    if constexpr (DO_HISTORY_CHANGE)
-                        history_damping = max(history_damping * constants.history_softening_grow, constants.history_min);
-                }
-
-                //update constants and track stats
-                if constexpr (DO_HISTORY_CHANGE)
-                    history_size = sum_geometrict_series(history_damping);
-
-                if constexpr (DO_HISTORY_CHANGE && DO_STATS)
-                {
-                    history_size_running_sum += history_size;
-                    history_size_highwater_mark = max(history_size_highwater_mark, history_size);
-                    history_size_lowwater_mark = min(history_size_lowwater_mark, history_size, 0);
-                }
-
-                if constexpr (DO_DELTA_CHANGE && DO_STATS)
-                {
-                    delta_running_sum += required_delta;
-                    delta_highwater_mark = max(delta_highwater_mark, required_delta);
-                    delta_lowwater_mark = min(delta_lowwater_mark, required_delta, 0);
-                }
-
-                prev_time = curr_time;
-                total_samples++;
-                total_time += current_iter_time;
-            }
-
-            last = clock();
-            last_iters = total_iters;
-        }
-    }
-
-    if(reported_iters == 0)
-    {
-        reported_iters = total_iters;
-        reported_time = cast(size_t) diff(start, clock());
-    }
-
-    const double iters_per_ms = cast(double) reported_iters * 1'000'000 / cast(double) reported_time;
-    const size_t total_real_time = diff(start, clock());
-
-    let reuslts = Benchmark_Results{
-
-        .total_real_time = total_real_time / 1000'000,  
-        .total_time = total_time,  
-        .total_iters = total_iters,  
-
-        .block_size = block_size,
-        .total_samples = total_samples,
-        .accepted_samples = accepted_samples,
-
-        .iters = reported_iters,
-        .time = reported_time / 1000'000,
-
-        .iters_per_ms = iters_per_ms,
-        .ms_per_iter = 1 / iters_per_ms,
-    }; 
-
-    if constexpr (DO_STATS)
-    {
-        let stats = Benchmark_Stats{
-            .history_size = history_size,
-            .avg_history_size = history_size_running_sum / total_samples,
-            .max_history_size = history_size_highwater_mark,
-            .min_history_size = history_size_lowwater_mark,
-
-            .delta = required_delta,
-            .avg_delta = delta_running_sum / total_samples,
-            .max_delta = delta_highwater_mark,
-            .min_delta = delta_lowwater_mark,
-
-        };
-
-        return Benchmark_Combined_Results{
-            .results = reuslts,
-            .stats = stats,
-        };
-    }
-    else
-        return reuslts;
+    dist.deviation /= dist.samples;
+    dist.deviation = sqrt(dist.deviation);
+    return dist;
 }
 
 
-template <thunk Fn>
-func benchmark(size_t optimal_time, Fn fn) -> Benchmark_Results
+void println(const char* text)
 {
-    Benchmark_Constants constants;
-    return benchmark<false>(optimal_time, optimal_time / 8, optimal_time, constants.optimal_samples, fn, constants);
+    std::cout << text << "\n";
 }
 
-template <thunk Fn>
-func benchmark(size_t optimal_time, Benchmark_Stats* stats, Fn fn) -> Benchmark_Results
+std::ostream& operator <<(std::ostream& stream, Distribution dist)
 {
-    Benchmark_Constants constants;
-    let combined = benchmark<true>(optimal_time, optimal_time / 8, optimal_time, constants.optimal_samples, fn, constants);
-    stats = combined.stats;
-    return combined.results;
+    return stream << dist.mean << " [" << dist.min << ", " << dist.max << "] {" << dist.deviation / dist.mean << "}";
 }
+
+template <typename Fn, typename Return, typename... Args>
+concept callable_ = std::is_invocable_r_v<Return, Fn, Args...>;
+
+//template <typename Fn, typename Fn_Type>
+//concept callable = std::is_invocable_r_v<Return, Fn, Args...>;
+
+
 
 double run_test()
 {
@@ -1305,7 +959,7 @@ double run_test()
     for(size_t i = 0; i < NUM_COUNT; i++)
         nums[i] = gen_random(MIN_NUM_SIZE, MAX_NUM_SIZE);
 
-    let lambda = [&]{
+    let addition = [&]{
         span<u64> to_s = to;
         for(size_t i = 0; i < NUM_COUNT; i++)
         {
@@ -1318,9 +972,18 @@ double run_test()
     i64 val1 = 1;
     i64 val2 = 3;
     i64 iter = 0;
-    let lambda2 = [&]{
+    let constant = [&]{
+        int count = 1000;
+        for(int i = 0; i < count; i++)
+        {
+            val1 = 3*val2 + 2;
+            val2 = val1/3 + 1;
+            iter++;
+        }
+    };
+
+    let random = [&]{
         int count = rand() % 1000 * 1000;
-        //int count = 1000;
         for(int i = 0; i < count; i++)
         {
             val1 = 3*val2 + 2;
@@ -1330,23 +993,66 @@ double run_test()
     };
 
 
-    std::cout << "NEW:" << std::endl;
+    print(benchmark<true>(1000, 1000 / 8, 1000, 300, random, Benchmark_Constants{}));
+    print(benchmark<true, false>(1000, 1000 / 8, 1000, 300, random, Benchmark_Constants{}));
 
-    std::cout << benchmark(2000, lambda).iters_per_ms << "\n";
-    std::cout << benchmark(2000, lambda).iters_per_ms << "\n";
-    std::cout << benchmark(2000, lambda).iters_per_ms << "\n";
-    std::cout << benchmark(2000, lambda).iters_per_ms << "\n";
+    size_t time = 500;
+    {
+        constexpr size_t sets = 8;
+        constexpr size_t repeats = 10;
+        Benchmark_Combined_Results stats[sets][repeats];
+        const char* names[sets] = {
+            "RANDOM_LESS_IFS",
+            "RANDOM_LESS_IFS_NO_HISTORY_SIZE",
+            "RANDOM_LESS_IFS_NO_HISTORY_CHANGE",
+            "RANDOM_LESS_IFS_AVG",
+            "CONSTANTS_LESS_IFS",
+            "CONSTANTS_LESS_IFS_NO_HISTORY_SIZE",
+            "CONSTANTS_LESS_IFS_NO_HISTORY_CHANGE",
+            "CONSTANTS_LESS_IFS_AVG",
+        };
+        double avg = 0;
+        double varience = 0;
 
-    std::cout << benchmark(1000, lambda2).iters_per_ms << "\n";
-    std::cout << benchmark(1000, lambda2).iters_per_ms << "\n";
-    std::cout << benchmark(1000, lambda2).iters_per_ms << "\n";
-    std::cout << benchmark(1000, lambda2).iters_per_ms << "\n";
+        for(size_t i = 0; i < repeats; i++)
+        {
+            stats[0][i] = benchmark<true>(time, time / 8, time, 200, random, Benchmark_Constants{});
+            stats[1][i] = benchmark<true, true, false>(time, time / 8, time, 200, random, Benchmark_Constants{});
+            stats[2][i] = benchmark<true, false>(time, time / 8, time, 200, random, Benchmark_Constants{});
+            stats[3][i] = benchmark_avg<true>(time, time / 8, time, 200, random, Benchmark_Constants{});
+
+            stats[4][i] = benchmark<true>(time, time / 8, time, 200, constant, Benchmark_Constants{});
+            stats[5][i] = benchmark<true, true, false>(time, time / 8, time, 200, constant, Benchmark_Constants{});
+            stats[6][i] = benchmark<true, false>(time, time / 8, time, 200, constant, Benchmark_Constants{});
+            stats[7][i] = benchmark_avg<true>(time, time / 8, time, 200, constant, Benchmark_Constants{});
+        }
+
+        for(size_t j = 0; j < sets; j++)
+        {
+            std::cout << "\n" << names[j] << "\n";
+            auto stats_span = span<Benchmark_Combined_Results>{stats[j], repeats};
+
+            std::cout << "ns_per_iter:\t" << 
+                get_dsitribution(stats_span, [](auto res){ return res.results.ns_per_iter; }) << "\n";
+            std::cout << "iters:\t" 
+                << get_dsitribution(stats_span, [](auto res){ return res.results.iters; }) << "\n";
+            std::cout << "avg_delta:\t" 
+                << get_dsitribution(stats_span, [](auto res){ return res.stats.avg_delta; }) << "\n";
+            std::cout << "min_delta:\t" 
+                << get_dsitribution(stats_span, [](auto res){ return res.stats.min_delta; }) << "\n";
+            std::cout << "max_delta:\t" 
+                << get_dsitribution(stats_span, [](auto res){ return res.stats.max_delta; }) << "\n";
+            std::cout << "accepted/rejected:\t" 
+                << get_dsitribution(stats_span, [](auto res){ return res.results.accepted_samples / cast(double) res.results.total_samples; }) << "\n";
+        }
+    }
 
 
-    std::cout << benchmark(1000, []{}).iters_per_ms << "\n";
-    std::cout << benchmark(1000, []{}).iters_per_ms << "\n";
-    std::cout << benchmark(1000, []{}).iters_per_ms << "\n";
-    std::cout << benchmark(1000, []{}).iters_per_ms << "\n";
+    //std::cout << "\nADD:" << std::endl;
+    //benchmark(2000, addition);
+    //benchmark(2000, addition);
+    //benchmark(2000, addition);
+    //benchmark(2000, addition);
 
     return 1.0;
 }
