@@ -18,9 +18,27 @@
     <ClCompile Include="arbitrary_precision.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="bin_prec\precisioncore.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="benchmark.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="big_int.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="preface.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="big_int_ops.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="unrelated.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="tests.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>
