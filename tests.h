@@ -15,7 +15,7 @@
 using Random_Generator = std::mt19937;
 
 
-proc test_carry_ops(Max_Unsigned_Type left, Max_Unsigned_Type right, Max_Unsigned_Type expected, Max_Unsigned_Type expected_carry, let carry_op)
+proc test_carry_ops(Max_Unsigned_Type left, Max_Unsigned_Type right, Max_Unsigned_Type expected, Max_Unsigned_Type expected_carry, let carry_op, Max_Unsigned_Type base_carry)
 {
     using T = u8;
     using Big_Int = Big_Int_<T>;
@@ -31,7 +31,7 @@ proc test_carry_ops(Max_Unsigned_Type left, Max_Unsigned_Type right, Max_Unsigne
     assert(as_number(l_s) == left);
     assert(as_number(r_s) == right);
 
-    let carry = carry_op(&res_s, l_s, r_s);
+    let carry = carry_op(&res_s, l_s, r_s, cast(T) base_carry);
     let obtained = as_number(res_s);
 
     return carry == expected_carry && obtained == expected;
@@ -39,7 +39,7 @@ proc test_carry_ops(Max_Unsigned_Type left, Max_Unsigned_Type right, Max_Unsigne
 
 proc test_add_carry(Max_Unsigned_Type left, Max_Unsigned_Type right, Max_Unsigned_Type expected, Max_Unsigned_Type expected_carry)
 {
-    return test_carry_ops(left, right, expected, expected_carry, add_carry<u8>);
+    return test_carry_ops(left, right, expected, expected_carry, add_carry<u8>, 0);
 }
 
 
@@ -63,7 +63,7 @@ proc test_complement_carry(Max_Unsigned_Type left, Max_Unsigned_Type expected)
 
 proc test_sub_carry(Max_Unsigned_Type left, Max_Unsigned_Type right, Max_Unsigned_Type expected, Max_Unsigned_Type expected_carry)
 {
-    return test_carry_ops(left, right, expected, expected_carry, sub_carry<u8>);
+    return test_carry_ops(left, right, expected, expected_carry, sub_carry<u8>, 0);
 }
 
 proc test_mul_carry(Max_Unsigned_Type left, Max_Unsigned_Type right, Max_Unsigned_Type expected, Max_Unsigned_Type expected_carry, size_t size)
