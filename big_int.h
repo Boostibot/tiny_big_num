@@ -297,6 +297,12 @@ namespace detail
     template<BIG_INT_TEMPL>
     proc swap(Big_Int_T* left, Big_Int_T* right) noexcept -> void 
     {
+        //@TODO: Carry safety checks over to main version
+        //@NOTE: Might be problematic and too simple of a check if 
+        // ever we allow for data sharing (or not even allow it but it just happens)
+        if(left == right)
+            return;
+
         using Big_Int = Big_Int_T;
         constexpr let transfer_static = [](Big_Int* left, Big_Int* right)
         {
@@ -304,7 +310,7 @@ namespace detail
                 std::swap(*static_data(left), *static_data(right));
         };
 
-        constexpr let transfer_half_static = [=](Big_Int* from, Big_Int* to)
+        constexpr let transfer_half_static = [](Big_Int* from, Big_Int* to)
         {
             copy_n(static_data(to), static_data(from), to->static_capacity);
 

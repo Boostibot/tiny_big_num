@@ -597,25 +597,25 @@ static std::vector<iptype> string2number(const std::string s, const size_t start
 		radix.push_back(num);
 		}
 	for (;vn.size() > 1; ++radix_inx )
-		{
+	{
 		if (radix_inx >= radix.size())
-			{
+		{
 			num = _int_precision_umul(&radix[radix_inx - 1], &radix[radix_inx - 1]); // replace by _int_precision_square_fourier() when ready
 			radix.push_back(num);  
-			}
+		}
 		for (i = 0, j = 0; j < vn.size(); ++i, j += 2)
-			{
+		{
 			if (j + 1 < vn.size())
-				{
+			{
 				num = _int_precision_umul(&vn[j + 1], &radix[radix_inx]);
 				vn[i] = _int_precision_uadd(&vn[j], &num);
-				}
+			}
 			else
 				vn[i] = vn[j];
-			}
+		}
 		vn.resize(i);
 //		std::cout << "\tResize vn =" << vn.size() << std::endl;  // DEBUG HVE
-		}
+	}
 
 	return vn[0];
  	}

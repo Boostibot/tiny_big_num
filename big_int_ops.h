@@ -11,10 +11,6 @@ constexpr size_t HALF_BIT_SIZE = BIT_SIZE<T> / 2;
 
 template <integral T>
 constexpr T FULL_MASK = cast(T) Max_Unsigned_Type(-1);
-template <integral T>
-constexpr T LOW_MASK = cast(T)(FULL_MASK<T> >> HALF_BIT_SIZE<T>);
-template <integral T>
-constexpr T HIGH_MASK = cast(T)(FULL_MASK<T> << HALF_BIT_SIZE<T>);
 /*
 template <typename T>
 struct Span
@@ -26,20 +22,7 @@ struct Span
     func& operator[](size_t index) noexcept       { assert(index < size && "index out of range"); return data[index]; }
 };
 */
-template <typename T>
-func as_number(span<T> nums) -> Max_Unsigned_Type
-{
-    constexpr size_t rep_size = sizeof(Max_Unsigned_Type) / sizeof(T);
 
-    size_t total_size = nums.size() * sizeof(T);
-    assert(total_size <= sizeof(Max_Unsigned_Type));
-
-    Max_Unsigned_Type out = 0;
-    for(size_t i = 0; i < nums.size(); i++)
-        out |= cast(Max_Unsigned_Type)(nums[i]) << (i * sizeof(T) * CHAR_BIT);
-
-    return out;
-}
 
 //TODO: remove dependance on std::span instead provide a trivially constructibe span struct - the goal of this is to move the efective core of the library away from any particular
 //       implementation.
@@ -49,18 +32,30 @@ func as_number(span<T> nums) -> Max_Unsigned_Type
 
 //0xFFAABB, 16 => 0xAABB => >> index
 template <integral T>
+func high_mask(size_t index = HALF_BIT_SIZE<T>) -> T
+{
+    return cast(T) (FULL_MASK<T> << index);
+}
+
+template <integral T>
+func low_mask(size_t index = HALF_BIT_SIZE<T>) -> T
+{
+    return cast(T) ~high_mask<T>(index);
+}
+
+template <integral T>
 func high_bits(T value, size_t index = HALF_BIT_SIZE<T>) -> T {
     return value >> index;
 }
 
 template <integral T>
 func low_bits(T value, size_t index = HALF_BIT_SIZE<T>) -> T {
-    return value & (FULL_MASK<T> >> index);
+    return value & low_mask<T>(index);
 };  
 
 template <integral T>
 func combine_bits(T low, T high, size_t index = HALF_BIT_SIZE<T>) -> T {
-    return (low & (FULL_MASK<T> >> index)) | (high << index);
+    return low_bits(low, index) | (high << index);
 };
 
 template <integral T>
@@ -93,6 +88,23 @@ func is_striped_form(span<T> num) -> bool
     return zeros_from_index(num) == num.size();
 }
 
+template <typename T>
+func as_number(span<T> nums) -> Max_Unsigned_Type
+{
+    constexpr size_t rep_size = sizeof(Max_Unsigned_Type) / sizeof(T);
+
+    let stripped = striped_trailing_zeros(nums);
+
+    size_t total_size = stripped.size() * sizeof(T);
+    assert(total_size <= sizeof(Max_Unsigned_Type));
+
+    Max_Unsigned_Type out = 0;
+    for(size_t i = 0; i < stripped.size(); i++)
+        out |= cast(Max_Unsigned_Type)(stripped[i]) << (i * sizeof(T) * CHAR_BIT);
+
+    return out;
+}
+
 template <integral T>
 struct Carry_Result
 {
@@ -114,6 +126,7 @@ struct Carry_Result
 //
 //All this complexity could have been avoided if c++ had a proper standard instrinsics library.
 //  (and we would also get about 2x - 4x speedup)
+
 
 template <integral T>
 func add_carry_step(T left, T right, T carry) -> Carried<T>
@@ -171,8 +184,11 @@ func add_carry(span<T>* to, span<const T> left, span<const T> right, T base_carr
     for (size_t i = 0; i < to_size; i++)
         update(i, add_carry_step<T>(left[i], right[i], carry));
 
-    for (size_t i = right.size(); i < left.size(); i++)
+    size_t i = right.size();
+    for (; i < left.size(); i++)
         update(i, add_carry_patch_step<T>(left[i], carry));
+
+    
 
     return carry;
 }
@@ -232,11 +248,12 @@ proc twos_complement_carry(span<T>* to, span<const T> left, T base_carry = 1) ->
 
     return carry;
 }
-
+/*
 template <integral T>
-func shift_up_carry(span<T>* out, span<const T> in, T by_bits, T prev_high = 0) -> T
+func shift_up_carry(span<T>* out, span<const T> in, size_t by_bits, T prev_high = 0) -> T
 {
     assert(out->size() >= in.size());
+    assert(by)
     size_t shift_items = by_bits / BIT_SIZE<T>;
     size_t shift_bits = by_bits - shift_items * BIT_SIZE<T>;
 
@@ -248,36 +265,167 @@ func shift_up_carry(span<T>* out, span<const T> in, T by_bits, T prev_high = 0) 
 
         T composed = prev_high | low << shift_bits;
         
-        (*out) = composed;
+        (*out)[i] = composed;
         prev_high = high;
     }
 
     null_n(out->data(), min(shift_items, out->size()));
     return prev_high;
 }
+*/
 
+/*
+//shifts up by `by_bits` the `in` digits handling carry between the number. Can shift up by any number of bits even surpassing the
+// bit size of individual digits. Accepts carry_in which is shifted into the first (smallest) digit not completely shifted out. 
+// (ie when shifting by 9 span of u8's the shift can be though of as shifting one digit forward and then doing bitshift by 1 on the whole number again.
+//  The carry_in is used only for that bitshift not for digit shift)
+// Returns the last digits shifted out part as a carry (again with the same logic while shifting more than one digits bit size as with carry_in)
 template <integral T>
-func shift_down_carry(span<T>* out, span<const T> in, T by_bits, T prev_prev_lowhigh = 0) -> T
+func shift_up_carry(span<T>* out, span<const T> in, size_t by_bits, size_t out_bounds, T carry_in) -> Carry_Result<T>
 {
+    assert(out->size() >= out_bounds);
     assert(out->size() >= in.size());
-    size_t shift_items = by_bits / BIT_SIZE<T>;
-    size_t shift_bits = by_bits - shift_items * BIT_SIZE<T>;
+    size_t shift_items_low = by_bits / BIT_SIZE<T>; 
+    size_t shift_items_high = div_round_up(by_bits, BIT_SIZE<T>);
+    size_t shift_bits = by_bits - shift_items_low * BIT_SIZE<T>;
+    size_t remaining_bits = BIT_SIZE<T> - shift_bits;
+    size_t to_index = min(out_bounds, in.size() + shift_items_high);
 
-    size_t capped_size = min(shift_items, out->size());
-    for (size_t i = in.size() - capped_size; i-- > 0;)
+    T high_item = 0;
+    T last_shifted = 0;
+    if(to_index >= shift_items_high + 1)
     {
-        T item = in[i + shift_items];
-        T low = low_bits(item, shift_bits);
-        T high = high_bits(item, shift_bits);
+        last_shifted = in[to_index - shift_items_high - 1];
 
-        T composed = prev_low | high >> shift_bits;
-
-        (*out) = composed;
-        prev_low = low;
+        //when we limit the written to index by out_bounds the first actually written digit still needs
+        // to have its upper half talken from somewhere. We in that case set it to the following item which happens
+        // to be the last_shifted. Again this only happens when the size is bound by out_bounds
+        if(to_index == out_bounds)
+            high_item = last_shifted;
     }
 
-    null_n(out->data() - capped_size, capped_size);
-    return prev_low;
+    for (size_t i = to_index; i-- > shift_items_high; )
+    {
+        T low_item = in[i - shift_items_high];
+
+        T high = low_bits(high_item, remaining_bits);
+        T low = high_bits(low_item, remaining_bits);
+
+        T composed = low | high << shift_bits;
+
+        (*out)[i] = composed;
+        high_item = low_item;
+    }
+
+    //we patch the first digit individually by 'shifting in' the carry_in 
+    {
+        T high = low_bits(high_item, remaining_bits);
+        T low = high_bits(carry_in, remaining_bits);
+
+        T composed = low | high << shift_bits;
+        (*out)[shift_items_low] = composed;
+    }
+
+    null_n(out->data(), min(out_bounds, shift_items_low));
+
+    //modulo for the rare case that we shift exactly by digits bit size
+    T carry_out = high_bits(last_shifted, remaining_bits % BIT_SIZE<T>);
+
+    return Carry_Result<T>{carry_out, out_bounds};
+}
+*/
+
+template <integral T>
+func shift_up_step(T item, size_t by_bits, T prev_item) -> Carried<T>
+{
+    assert(by_bits < BIT_SIZE<T>);
+
+    const size_t remaining_bits = BIT_SIZE<T> - by_bits;
+    const T low_item = item;
+    const T high_item = prev_item;
+    
+    const T high = low_bits(high_item, remaining_bits);
+    const T low = high_bits(low_item, remaining_bits);
+
+    const T composed = low | high << by_bits;
+    return Carried<T>{composed, low_item};
+}
+
+
+template <integral T>
+func shift_down_step(T item, size_t by_bits, T prev_item) -> Carried<T>
+{
+    assert(by_bits < BIT_SIZE<T>);
+
+    //0000|0101'0011 << 3
+    //        |----|
+    //0010|1001'1000
+    //     |----|
+
+    const size_t remaining_bits = BIT_SIZE<T> - by_bits;
+    const T low_item = prev_item;
+    const T high_item = item;
+
+    const T high = low_bits(high_item, by_bits);
+    const T low = high_bits(low_item, by_bits);
+
+    const T composed = low | high << remaining_bits;
+    return Carried<T>{composed, low_item};
+}
+
+template <integral T>
+func shift_up_carry(span<T>* out, span<const T> in, size_t by_bits, T carry_in) -> T
+{
+    assert(out->size() >= in.size());
+    assert(by_bits < BIT_SIZE<T>);
+
+    if(in.size() == 0)
+        return shift_up_step<T>(carry_in, by_bits, 0).value;
+
+    const T shifted_out = in[in.size() - 1];
+    T prev = shifted_out;
+    for (size_t i = in.size(); i-- > 1; )
+    {
+        let res = shift_up_step<T>(in[i - 1], by_bits, prev);
+        (*out)[i] = res.value;
+        prev = res.carry;
+    }
+
+    {
+        let res = shift_up_step<T>(carry_in, by_bits, prev);
+        (*out)[0] = res.value;
+    }
+
+    let carry_out = shift_up_step<T>(shifted_out, by_bits, 0);
+    return carry_out.value;
+}
+
+
+template <integral T>
+func shift_down_carry(span<T>* out, span<const T> in, size_t by_bits, T carry_in) -> T
+{
+    assert(out->size() >= in.size());
+    assert(by_bits < BIT_SIZE<T>);
+
+    if(in.size() == 0)
+        return shift_down_step<T>(carry_in, by_bits, 0).value;
+
+    const T shifted_out = in[0];
+    T prev = shifted_out;
+    for (size_t i = 0; i < in.size() - 1; i++)
+    {
+        let res = shift_down_step<T>(in[i + 1], by_bits, prev);
+        (*out)[i] = res.value;
+        prev = res.carry;
+    }
+
+    {
+        let res = shift_down_step<T>(carry_in, by_bits, prev);
+        (*out)[in.size() - 1] = res.value;
+    }
+
+    let carry_out = shift_down_step<T>(shifted_out, by_bits, 0);
+    return carry_out.value;
 }
 
 //return -1 if left < right
@@ -306,7 +454,7 @@ func compare(span<const T> left, span<const T> right) -> int
 
 
 template <integral T>
-func mul_carry_step(T left, T right, T carry) -> Carried<T>
+func mul_carry_step(T left, T right, T last_value = 0) -> Carried<T>
 {
     //we do the carried multiplication by multiplying each digit normally and summing the overflow 
     // => 25  
@@ -383,15 +531,15 @@ func mul_carry(span<T>* to, span<const T> left, T right) -> Carry_Result<T>
     {
         if(right == 1)
         {
-            copy_n(to->data(), left.data(), left.size());
+            safe_copy_n(to->data(), left.data(), left.size());
             return Carry_Result<T>{0, left.size()};
         }
 
-        if(is_power_of_two(right))
+        /*if(is_power_of_two(right))
         {
             let res = shift_up_carry(to, left, right);
             return Carry_Result<T>{res, left.size()};
-        }
+        }*/
     }
 
     T last_value = 0;
@@ -411,7 +559,7 @@ func mul_carry(span<T>* to, span<const T> left, T right) -> Carry_Result<T>
 }
 
 template <integral T>
-func mul_quadratic(span<T>* to, span<T>* temp, span<const T> left, span<const T> right)
+proc mul_quadratic(span<T>* to, span<T>* temp, span<const T> left, span<const T> right)
 {
     size_t max_result_size = left.size() + right.size() + 1;
     assert(to->size() >= max_result_size);
@@ -436,7 +584,7 @@ func mul_quadratic(span<T>* to, span<T>* temp, span<const T> left, span<const T>
 }
 
 template <integral T>
-func mul_quadratic_fused(span<T>* to, span<const T> left, span<const T> right)
+proc mul_quadratic_fused(span<T>* to, span<const T> left, span<const T> right)
 {
     size_t max_result_size = left.size() + right.size() + 1;
     assert(to->size() >= max_result_size);
@@ -444,17 +592,6 @@ func mul_quadratic_fused(span<T>* to, span<const T> left, span<const T> right)
 
     for(size_t i = 0; i < right.size(); i++)
     {
-        let mul_res = mul_carry<T>(temp, left, right[i]);
-        size_t curr_size = mul_res.size + 1;
-        (*temp)[mul_res.size] = mul_res.carry;
-
-        assert(shifted_to.size() >= curr_size);
-        assert(temp->size() >= curr_size);
-
-        let carry = add_carry<T>(&shifted_to, shifted_to, temp->subspan(0, curr_size));
-        assert(carry == 0); //no carry should happen in this case
-
-        //MUL
         mut shifted_to = to->subspan(i);
         T curr_right = right[i];
         if(curr_right == 0) 
@@ -464,7 +601,7 @@ func mul_quadratic_fused(span<T>* to, span<const T> left, span<const T> right)
         {
             if(curr_right == 1)
             {
-                let carry = add_carry(&shifted_to, shifted_to, left);
+                let carry = add_carry<T>(&shifted_to, shifted_to, left);
                 assert(carry == 0); //no carry should happen in this case
                 continue;
             }
@@ -477,36 +614,53 @@ func mul_quadratic_fused(span<T>* to, span<const T> left, span<const T> right)
             }*/
         }
 
-        T last_mul_val = 0;
-        for (size_t i = 0; i < left.size(); i++)
+        T mul_carry = 0;
+        T add_carry = 0;
+        for (size_t j = 0; j < left.size(); j++)
         {
-            T curr_left = left[i];
-            let res = mul_carry_step<T>(curr_left, curr_right, last_mul_val);
+            T curr_left = left[j];
+            T curr_to = shifted_to[j];
 
+            let mul_res = mul_carry_step<T>(curr_left, curr_right, mul_carry);
+            let add_res = add_carry_step<T>(curr_to, mul_res.value, add_carry);
 
-            last_mul_val = res.carry;
+            shifted_to[j] = add_res.value;
+
+            mul_carry = mul_res.carry;
+            add_carry = add_res.carry;
         }
 
-        let obtained = as_number(*to);
+        T combined_carry = mul_carry + add_carry;
+        assert(combined_carry >= mul_carry && "should not overflow");
 
-        return Carry_Result<T>{
-            last_value,
-                left.size(),
-        };
-
-        //ADD
-        T carry = base_carry;
-        proc update = [&](size_t i, Carried<T> carried) {
-            (*to)[i] = carried.value;
-            carry = carried.carry;
-        };
-
-        const size_t to_size = min(left.size(), right.size());
-        for (size_t i = 0; i < to_size; i++)
-            update(i, add_carry_step<T>(left[i], right[i], carry));
-
-        for (size_t i = right.size(); i < left.size(); i++)
-            update(i, add_carry_patch_step<T>(left[i], carry));
-
+        if(combined_carry != 0)
+        {
+            for (size_t j = left.size(); i < shifted_to.size(); i++)
+            {
+                let patch_res = add_carry_patch_step<T>(shifted_to[i], combined_carry);
+                shifted_to[j] = patch_res.value;
+                if(patch_res.carry == 0)
+                    break;
+            }
+        }
     }
+}
+
+
+
+template <integral From, integral To>
+proc to_base(span<const From> num, span<To>* to, size_t base, let conversion_func)
+{
+    //1020
+    //1 
+    // 0
+    //  2
+    //   0
+
+    //1020 % 10 = 0
+    //102  % 10 = 2
+    //10   % 10 = 0
+    //1    % 10 = 1
+
+    //
 }

@@ -211,7 +211,34 @@ proc copy_n(T* to, const T* from, size_t count) -> void
             to[i] = from[i];
     }
     else
+    {
+        assert(cast(size_t) abs(to - from) >= count && "adresses must not overlap");
         memcpy(to, from, count * sizeof(T));
+    }
+}
+
+template <integral T>
+proc move_n(T* to, const T* from, size_t count) -> void
+{
+    if (std::is_constant_evaluated())
+        copy_n(to, from, count);
+    else
+        memmove(to, from, count * sizeof(T));
+}
+
+template <integral T>
+proc safe_copy_n(T* to, const T* from, size_t count) -> void
+{
+    if (std::is_constant_evaluated())
+        copy_n(to, from, count);
+    else
+    {
+        let diff = to - from;
+        if(cast(size_t) abs(diff) < count)
+            move_n(to, from, count);
+        else
+            copy_n(to, from, count);
+    }
 }
 
 template <integral T>

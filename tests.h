@@ -82,6 +82,59 @@ proc test_mul_carry(Max_Unsigned_Type left, Max_Unsigned_Type right, Max_Unsigne
     return res.carry == expected_carry && obtained == expected && res.size == size;
 }
 
+//@TODO: factor aout into procs taking two big ints and procs taking big int and num
+//@TODO: Change asserts to some other macro 
+
+struct Shift_Test_Args
+{
+    Max_Unsigned_Type left;
+    Max_Unsigned_Type right;
+    Max_Unsigned_Type carry_in = 0;
+};
+
+struct Shift_Test_Res
+{
+    Max_Unsigned_Type value;
+    Max_Unsigned_Type carry;
+
+    bool constexpr operator ==(Shift_Test_Res const&) const noexcept = default;
+};
+
+func test_shift_both_carry(Shift_Test_Args args, Shift_Test_Res expected, bool shift_up)
+{
+    using T = u8;
+    using Big_Int = Big_Int_<T>;
+    size_t type_size_ratio = sizeof(Max_Unsigned_Type) / sizeof(T);
+    Big_Int l = args.left;
+
+    let given = as_number<T>(l);
+
+    Big_Int out;
+    resize(&out, l.size + args.right / sizeof(T) + 1); // more than enough size
+
+    span<T> res_s = out;
+    T res = cast(T) -1;
+
+    if(shift_up)
+        res = shift_up_carry<T>(&res_s, l, cast(T) args.right, cast(T) args.carry_in);
+    else
+        res = shift_down_carry<T>(&res_s, l, cast(T) args.right, cast(T) args.carry_in);
+
+    let obtained = as_number(res_s);
+    return res == expected.carry && obtained == expected.value;
+}
+
+func test_shift_up_carry(Shift_Test_Args args, Shift_Test_Res expected)
+{
+    return test_shift_both_carry(args, expected, true);
+}
+
+func test_shift_down_carry(Shift_Test_Args args, Shift_Test_Res expected)
+{
+    return test_shift_both_carry(args, expected, false);
+}
+
+
 proc test_mul_quadratic(Max_Unsigned_Type left, Max_Unsigned_Type right, Max_Unsigned_Type expected)
 {
     using T = u8;
@@ -102,9 +155,13 @@ proc test_mul_quadratic(Max_Unsigned_Type left, Max_Unsigned_Type right, Max_Uns
     assert(as_number(r_s) == right);
 
     mul_quadratic(&res_s, &temp_s, l_s, r_s);
-    let obtained = as_number(res_s);
+    let obtained1 = as_number(res_s);
 
-    return obtained == expected;
+    mul_quadratic_fused(&res_s, l_s, r_s);
+    let obtained2 = as_number(res_s);
+
+
+    return obtained1 == expected;
 }
 
 proc test_add_carry()
@@ -172,6 +229,26 @@ proc test_mul_carry()
     assert(test_mul_carry(13745, 137, 0xBBB9, 0x1C, 2));
 }
 
+
+proc test_shift_carry()
+{
+    using Res = Shift_Test_Res;
+    using Args = Shift_Test_Args;
+
+    assert(test_shift_up_carry(Args{0, 0, 0}, Res{0, 0}));
+    assert(test_shift_up_carry(Args{0, 1, 0}, Res{0, 0}));
+    assert(test_shift_up_carry(Args{0, 1, 0xFF}, Res{0, 0x1})); //this is sort of a weird edge case I dont know how to best handle
+    assert(test_shift_up_carry(Args{1, 1}, Res{2, 0}));
+    assert(test_shift_up_carry(Args{1, 4}, Res{16, 0}));
+    assert(test_shift_up_carry(Args{1, 4, 0b1010'0000}, Res{0b11010, 0}));
+    assert(test_shift_up_carry(Args{11, 4}, Res{176, 0}));
+    assert(test_shift_up_carry(Args{0xAB, 0x4}, Res{0xB0, 0xA}));
+    assert(test_shift_up_carry(Args{0xAB, 0x4, 0xD0}, Res{0xBD, 0xA}));
+    assert(test_shift_up_carry(Args{0xAB, 0x4, 0x0D}, Res{0xB0, 0xA}));
+    assert(test_shift_up_carry(Args{0b0101'0101'0111'0001, 7}, Res{0b1011'1000'1000'0000, 0b010'1010}));
+    assert(test_shift_up_carry(Args{0b0101'0101'0111'0001, 7, 0b11001100}, Res{0b1011'1000'1110'0110, 0b010'1010}));
+}
+
 proc test_mul_quadratic()
 {
     assert(test_mul_quadratic(0, 0, 0));
@@ -197,6 +274,7 @@ runtime_proc run_tests()
     test_complement_carry();
     test_sub_carry();
     test_mul_carry();
+    test_shift_carry();
     test_mul_quadratic();
 }
 
