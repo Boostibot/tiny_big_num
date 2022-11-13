@@ -1,7 +1,5 @@
 #pragma once
 
-#include <algorithm>
-#include <ranges>
 #include "big_int.h"
 
 template <typename T>
@@ -51,10 +49,45 @@ func combine_bits(T low, T high, size_t index = HALF_BIT_SIZE<T>) -> T {
 };
 
 template <integral T>
+func dirty_combine_bits(T low, T high, size_t index = HALF_BIT_SIZE<T>) -> T {
+    assert(high_bits(low, index) == 0 && "low must not have high bits use combine_bits instead");
+    return low | (high << index);
+};
+
+template <integral T>
+func integral_log2(T val) -> T  
+{
+    if constexpr(sizeof(T) > 8)
+    {
+        T k = 0;
+
+        while (val >>= 1) 
+            k++;
+
+        return k;
+    }
+    else
+    {
+        static_assert(sizeof(T) <= 8 && "Higher integer sizes not supported");
+        T  k = 0;
+        if (val > 0xFFFFFFFFu) { val >>= 32; k |= 32; }
+        if (val > 0x0000FFFFu) { val >>= 16; k |= 16; }
+        if (val > 0x000000FFu) { val >>= 8;  k |= 8;  }
+        if (val > 0x0000000Fu) { val >>= 4;  k |= 4;  }
+        if (val > 0x00000003u) { val >>= 2;  k |= 2;  }
+
+        k |= (val & 2) >> 1;
+        return k;
+    }
+}
+
+template <integral T>
 struct Overflow
 {
     T value;
     T overflow;
+
+    bool constexpr operator ==(Overflow const&) const noexcept = default;
 };
 
 template <integral T>
@@ -62,6 +95,8 @@ struct Batch_Overflow
 {
     size_t size; //count of digits written to output span
     T overflow;
+
+    bool constexpr operator ==(Batch_Overflow const&) const noexcept = default;
 };
 
 template <integral T>
@@ -589,7 +624,9 @@ func is_power_of_two(T num)
 }
 
 static constexpr bool DO_MUL_OPTIMS = true;
-template <integral T>
+static constexpr bool DO_DIV_OPTIMS = true;
+
+template <integral T, bool DO_OPTIMS = DO_MUL_OPTIMS>
 proc mul_overflow_batch(span<T>* to, span<const T> left, T right, T carry_in = 0) -> Batch_Overflow<T>
 {
     assert(to->size() >= left.size());
@@ -597,7 +634,7 @@ proc mul_overflow_batch(span<T>* to, span<const T> left, T right, T carry_in = 0
     if(right == 0) 
         return Batch_Overflow<T>{0, 0};
 
-    if constexpr(DO_MUL_OPTIMS)
+    if constexpr(DO_OPTIMS)
     {
         if(right == 1)
         {
@@ -605,27 +642,176 @@ proc mul_overflow_batch(span<T>* to, span<const T> left, T right, T carry_in = 0
             return Batch_Overflow<T>{left.size(), 0};
         }
 
-        /*if(is_power_of_two(right))
+        if(is_power_of_two(right))
         {
-            let res = shift_up_overflow_batch(to, left, right);
-            return Batch_Overflow<T>{left.size(), res};
-        }*/
+            let shift_bits = integral_log2(right);
+            return shift_up_overflow_batch(to, left, shift_bits);
+        }
     }
 
-    T last_value = carry_in;
+    T carry = carry_in;
     for (size_t i = 0; i < left.size(); i++)
     {
-        let res = mul_overflow<T>(left[i], right, last_value);
+        let res = mul_overflow<T>(left[i], right, carry);
         (*to)[i] = res.value;
-        last_value = res.overflow;
+        carry = res.overflow;
     }
 
-    let obtained = as_number(*to);
+    return Batch_Overflow<T>{left.size(), carry};
+}
 
-    return Batch_Overflow<T>{
-        left.size(),
-        last_value,
-    };
+
+template <integral T>
+func div_overflow_low_carry(T left, T right, T carry_in = 0) -> Overflow<T>
+{
+    
+    //The algorhitm works as follows (only in different base - we use base 10 for demosntartion)
+    // 61 / 5 == 10 + 11 / 5 == 10 + 2 == 12
+    // 
+    //To go through this instinctive algorhitm we did the followig:
+    // {61/5} == [6/5]*10 + (6%1)*10 + {1/5} == 1*10 + {(10 + 1) / 5} == 10 + {11/5} == ... == 12
+    // where {} means normal (ie infinitely precise fraction) used for yet uncalculated division
+
+    //this however only works for carry thats smaller than half bits 
+    // (else it doesnt get carried through properly through the modulos
+    //  so for example div_overflow_low_carry(0, 0xFF, 0xF0) should return 0xF0 but returns less) => assert
+    assert(high_bits(carry_in) == 0 && "carry must be small")
+
+    const T operand_high = combine_bits<T>(high_bits(left), carry_in);
+    const T res_high = operand_high / right;
+    const T middle_carry = operand_high % right;
+
+    const T operand_low = combine_bits<T>(low_bits(left), middle_carry);
+    const T res_low = operand_low / right;
+    const T out_carry = operand_low % right;
+
+    const T res = dirty_combine_bits(res_low, res_high);
+    return Overflow<T>{res, out_carry};
+}
+
+
+template <integral T>
+func div_overflow(T left, T right, T carry_in = 0) -> Overflow<T>
+{
+    //We try to prevent get carry to be only half bits and then call div_overflow_low_carry
+
+    //we can imagine the problem as following:
+    // left: 00      =: l = l1 + l2*b
+    // right: 19     =: r = r1 + r2*b
+    // carry_in: 33  =: c = c1 + c2*b
+    // 
+    // where b is half bits base ie 2^HALF_BIT_SIZE<T> //(I will be using ^ operator to denote powers NOT xor)
+    // 
+    // => {33|00 / 19} == {3300 / 19}  <- this obviously cannot be calculated because we are using two cells for 3300
+    
+    // => we try to reduce it into form where we have: 
+    //   {3300 / 19} = W + {300 / 19} 
+    // which we can pass into div_overflow_low_carry 
+    // (it doesnt have to be exactly 300 (low_bits of carry_in) but any number that only has low_bits)
+    
+    // which means we are searching for some number `x` through which we can reduce carry_in by substarcting from it left x-times:
+    //   { c*b^2 - x*r <= c1*b^2 }
+    // in our example that is:
+    //   { 3300 - x*19 <= 300 } such x is 151 for example
+    // the condition could also just be { c*b^2 - x*l < b^3 } which is technically exactly what we want but the previous
+    //  condition is a lot easier (and faster) to implement since some of the terms nicely cancel out
+    // 
+    // x is a single slot number just like any other so: x = x1 + x2*b but we can freely choose x 
+    //  (condition is inequality) so if we let x1 = 0 we will always be able find x2 such that the condition is met
+    // this gives us: x = x2*b
+    //   { c*b^2 - x2*b*r <= c1*b^2 } 
+    //   <=> { c1*b^2 + c2*b^3 - x2*b*r <= c1*b^2 }
+    //   <=> { c2*b^3 - x2*b*r <= 0 }
+    //   <=> { c2*b^3 <= x2*b*r }
+    //   <=> { x2 >= (c2*b^3) / (b*r) = (c2*b^2) / r }
+    //   <=> { x2 >= c2*b / r * b } 
+    //   <=> x2 >= {c2*b / r} * b >= [c2*b / r] * b
+    //
+    //  where [ ] means ceil c2*b and r is now single slot
+    // 
+    //  we cant calculate ceil divison the standard way since it risks overflowing but we can always add 1 to the result
+    //   since that will never overflow: suppose c2 is the biggest it can be and r smallest it can be (non 0) 
+    //    => [c2*b / r] * b + 1 == [0xFF*b / 1] * b + 1 == 0xFF0000 + 1 == 0xFF0001 
+    //   (we used single byte base as demonstartion but this works with any base)
+    //   this gives us: x2 >= [c2*b / r] * b + 1
+    //
+    // such x2 (=> x) should give us proper carry_in we can pass into div_overflow_low_carry. 
+    //  We just have to remember to add the resulting x into the calculated quotient.
+    //
+    // We still however need to check if such x will not result in the carry_in being negative:
+    //   { c*b^2 - x*r >= 0 }    <=> { c*b^2 - x2*b*r >= 0 } 
+    //   <=> { c*b - x2*r >= 0 } <=> { c*b^2 >= x2*r }
+    //   <=> { x2 <= c*b^2 / r = c*b / r *b }
+    //   <=> x2 <= {c*b/r} * b 
+    //   <=> x2 <= [c*b/r] * b <= {c*b/r} * b 
+    //
+    // where [ ] means floor. 
+    //
+    // Here we ran into a problem since if c1 = 0:
+    //   [c2*b / r] * b + 1 <= x2 <= [c*b/r] * b == [c2*b / r] * b 
+    // which of course cant hold (notice the same expression on left and right)
+    // We will need to handle this case separately.
+    //
+    // let R := c*b^2 - x*r
+    // let x_ns = [c2*b / r]  //read as 'x not-shifted'
+    // R = c*b^2 - x*r = c*b^2 - x2*b*r = c*b^2 - ([c2*b / r] * b + 1)*b*r =
+    //   = c*b^2 - [c2*b / r]*b^2*r - b*r = c*b^2 - [c2*b / r]*r*b^2 - b*r =
+    //   = ( c - [c2*b / r]*r )*b^2 - b*r ~=!!!!=~ ( c - c2*b )*b^2 - b*r =
+    //   = c1*b^2 - b*r = b*(c1*b - r) 
+
+    const T c = carry_in;
+    const T r = right;
+    const T l = left;
+
+    const T c1 = low_bits(c);
+    const T c2 = high_bits(c);
+    const T c2b = high_mask<T>() & c;
+
+    //@TODO: rewrite the comment after this function is finished
+    const T x2_nx = c2b / r; //x2 is multiplied by b and incremented by 1 but that would result in overflow
+    //const T R = 
+
+    return Overflow<T>{0, 0};
+}
+
+template <integral T, bool DO_OPTIMS = DO_DIV_OPTIMS>
+proc div_overflow_batch(span<T>* to, span<const T> left, T right, T carry_in = 0) -> Batch_Overflow<T>
+{
+    assert(to->size() >= left.size());
+    assert(high_bits(right) == 0 && "only works for divisors under half bit size");
+
+    //decide how to handle this
+    if(right == 0) 
+        return Batch_Overflow<T>{0, 0};
+
+    if constexpr(DO_OPTIMS)
+    {
+        if(right == 1)
+        {
+            safe_copy_n(to->data(), left.data(), left.size());
+            return Batch_Overflow<T>{left.size(), 0}; 
+        }
+
+        if(is_power_of_two(right))
+        {
+            let shift_bits = integral_log2(right);
+            let shift_res = shift_down_overflow_batch(to, left, shift_bits);
+            //because of the way shifting down result is defined we have to process the reuslt
+            const T carry = shift_res.overflow >> (BIT_SIZE<T> - shift_bits);
+            return Batch_Overflow<T>{left.size(), carry};
+        }
+    }
+
+    T carry = carry_in;
+    for (size_t i = left.size(); i-- > 0; )
+    {
+        let res = div_overflow<T>(left[i], right, carry);
+        (*to)[i] = res.value;
+        carry = res.overflow;
+    }
+
+    return Batch_Overflow<T>{left.size(), carry};
+    
 }
 
 template <integral T>

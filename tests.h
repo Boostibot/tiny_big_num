@@ -79,9 +79,8 @@ proc test_add_carry()
 
         Max adjusted_overflow = big_add_res.overflow;
         Max adjusted_value = as_number(out_s);
-        if(numeric_add_res.overflow == 0)
+        if(big_add_res.size != MAX_TYPE_SIZE_FRACTION<T>)
         {
-            assert(big_add_res.size != MAX_TYPE_SIZE_FRACTION<T>);
             adjusted_value += cast(Max) big_add_res.overflow << (big_add_res.size * BIT_SIZE<T>);
             adjusted_overflow = 0;
         }
@@ -190,6 +189,45 @@ proc test_mul_carry()
 }
 
 
+
+proc test_div_carry()
+{
+    using T = u8;
+    using Max = Max_Unsigned_Type;
+    using Res = Batch_Op_Result;
+    using SRes = Overflow<T>;
+    using Big = Big_Int_<T>;
+
+    assert((div_overflow<T>(0x12, 0x0A, 0) == SRes{1, 0x08}));
+    assert((div_overflow<T>(0x12, 0xEA, 0) == SRes{0, 0x12}));
+    assert((div_overflow2<T>(0x0, 0xFF, 0x01) == SRes{1, 0x01}));
+
+    let div_overflow_batch = [](Max left, Max right, Max carry_in = 0) -> Batch_Op_Result{
+        mut out = make_big_int_with_size<T>(MAX_TYPE_SIZE_FRACTION<T> + 1);
+        span<T> out_s = out;
+
+        let big_left = Big{left};
+        let res = ::div_overflow_batch<T>(&out_s, big_left, cast(T) right, cast(T) carry_in);
+        let num = as_number(out_s);
+        return Batch_Op_Result{num, res.overflow};
+    };
+
+    //@TODO: add automated tests
+    //assert((div_overflow_batch(0, 0) == Res{0, 0})); //do not test div by 0 yet
+    //assert((div_overflow_batch(1, 0) == Res{0, 0}));
+    assert((div_overflow_batch(0, 1) == Res{0, 0}));
+    assert((div_overflow_batch(1, 1) == Res{1, 0}));
+    assert((div_overflow_batch(25, 1) == Res{25, 0}));
+    assert((div_overflow_batch(25, 5) == Res{5, 0}));
+    assert((div_overflow_batch(0xFF, 0x10) == Res{0xF, 0xF}));
+    assert((div_overflow_batch(0xA1, 0x11) == Res{0x9, 0x8}));
+    assert((div_overflow_batch(0xABCDEF00, 1) == Res{0xABCDEF00, 0}));
+    assert((div_overflow_batch(0xABCDEF00, 0xAB) == Res{0x101344C, 0x3C}));
+    assert((div_overflow_batch(0xABCDEF00, 0x1000) == Res{0xABCDE, 0xF00}));
+    assert((div_overflow_batch(13745, 137) == Res{100, 45}));
+}
+
+
 proc test_shift_carry()
 {
     using T = u8;
@@ -212,6 +250,14 @@ proc test_shift_carry()
         let res = ::shift_down_overflow_batch<T>(&out_s, Big{left}, right, cast(T) carry_in);
         return Batch_Op_Result{as_number(out_s), res.overflow};
     };
+
+    //[0xFF, 0xEE, 0xDD] [0xAA, 0xBB, 0xCC] >> 4
+    //  LOWER               UPPER
+    //              shift_up_overflow_batch(LOWER, 4, 0xDD) 
+    //shift_up_overflow_batch(LOWER, 4, 0x00) = middle_shifted_out
+
+    //[0x0F, 0xFE, 0xED] [0xE0 | 0x0A, 0x
+                            
 
     assert((shift_up_overflow_batch(0, 0, 0) == Res{0, 0}));
     assert((shift_up_overflow_batch(0, 1, 0) == Res{0, 0}));
@@ -274,7 +320,7 @@ proc test_mul_quadratic()
 
     let auto_test_mul_overflow_batch = [](Big_Int left, Big_Int right) -> bool{
         
-    }
+    };
 
     assert(test_mul_overflow_batch(0, 0, 0));
     assert(test_mul_overflow_batch(1, 0, 0));
@@ -300,6 +346,7 @@ runtime_proc run_typed_tests()
     test_complement_carry();
     test_sub_carry();
     test_mul_carry();
+    test_div_carry();
     test_shift_carry();
     test_mul_quadratic<T>();
 }
