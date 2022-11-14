@@ -675,7 +675,7 @@ func div_overflow_low_carry(T left, T right, T carry_in = 0) -> Overflow<T>
     //this however only works for carry thats smaller than half bits 
     // (else it doesnt get carried through properly through the modulos
     //  so for example div_overflow_low_carry(0, 0xFF, 0xF0) should return 0xF0 but returns less) => assert
-    assert(high_bits(carry_in) == 0 && "carry must be small")
+    assert(high_bits(carry_in) == 0 && "carry must be single digit");
 
     const T operand_high = combine_bits<T>(high_bits(left), carry_in);
     const T res_high = operand_high / right;
@@ -689,9 +689,18 @@ func div_overflow_low_carry(T left, T right, T carry_in = 0) -> Overflow<T>
     return Overflow<T>{res, out_carry};
 }
 
+template <integral T>
+struct Double_Overflow
+{
+    T low;
+    T high;
+    T overflow;
+    
+    bool constexpr operator ==(Double_Overflow const&) const noexcept = default;
+};
 
 template <integral T>
-func div_overflow(T left, T right, T carry_in = 0) -> Overflow<T>
+func div_overflow(T left, T right, T carry_in = 0) -> Double_Overflow<T>
 {
     //We try to prevent get carry to be only half bits and then call div_overflow_low_carry
 
@@ -759,19 +768,38 @@ func div_overflow(T left, T right, T carry_in = 0) -> Overflow<T>
     //   = ( c - [c2*b / r]*r )*b^2 - b*r ~=!!!!=~ ( c - c2*b )*b^2 - b*r =
     //   = c1*b^2 - b*r = b*(c1*b - r) 
 
+    const T b = 1 << HALF_BIT_SIZE<T>;
     const T c = carry_in;
     const T r = right;
     const T l = left;
 
     const T c1 = low_bits(c);
     const T c2 = high_bits(c);
-    const T c2b = high_mask<T>() & c;
 
     //@TODO: rewrite the comment after this function is finished
-    const T x2_nx = c2b / r; //x2 is multiplied by b and incremented by 1 but that would result in overflow
-    //const T R = 
+    let c2bb_div_r_res = div_overflow_low_carry<T>(0, r, c2); //[c2,0] / r2 == c2*b^2 / r2
+    const T c2bb_div_r = c2bb_div_r_res.value;
+    const T c2bb_mod_r = c2bb_div_r_res.overflow;
 
-    return Overflow<T>{0, 0};
+    const T x_c1 = (c1*b) / r;
+    const T x_c2 = c2bb_div_r;
+
+    const T R_l = l;
+    const T R_c1 = (c1*b) % r;
+    const T R_c2 = c2bb_mod_r;
+
+    let x = add_overflow_any<T>(x_c1, x_c2);
+    let R = add_overflow_any<T>(R_c1 * b, R_c2 * b, l); //overflow!!!
+
+    assert(high_bits(R.overflow) == 0 && "remainder should not have any high bits after normalization step");
+
+    let reminder_quotient = div_overflow_low_carry<T>(R.value, r, R.overflow);
+    //let quotient = x + reminder_quotient.value;
+    let quotient = add_overflow_any<T>(x_c1, x_c2, reminder_quotient.value); 
+    let remainder = reminder_quotient.overflow;
+    //it is both simpler and faster to not compute x and directly compute the final quotient
+
+    return Double_Overflow<T>{quotient.value, quotient.overflow, remainder};
 }
 
 template <integral T, bool DO_OPTIMS = DO_DIV_OPTIMS>
@@ -805,7 +833,7 @@ proc div_overflow_batch(span<T>* to, span<const T> left, T right, T carry_in = 0
     T carry = carry_in;
     for (size_t i = left.size(); i-- > 0; )
     {
-        let res = div_overflow<T>(left[i], right, carry);
+        let res = div_overflow_low_carry<T>(left[i], right, carry);
         (*to)[i] = res.value;
         carry = res.overflow;
     }

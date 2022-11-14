@@ -196,11 +196,12 @@ proc test_div_carry()
     using Max = Max_Unsigned_Type;
     using Res = Batch_Op_Result;
     using SRes = Overflow<T>;
+    using DRes = Double_Overflow<T>;
     using Big = Big_Int_<T>;
 
-    assert((div_overflow<T>(0x12, 0x0A, 0) == SRes{1, 0x08}));
-    assert((div_overflow<T>(0x12, 0xEA, 0) == SRes{0, 0x12}));
-    assert((div_overflow2<T>(0x0, 0xFF, 0x01) == SRes{1, 0x01}));
+    assert((div_overflow_low_carry<T>(0x12, 0x0A, 0) == SRes{1, 0x08}));
+    assert((div_overflow_low_carry<T>(0x12, 0xEA, 0) == SRes{0, 0x12}));
+    assert((div_overflow<T>(0x0, 0xFF, 0x01) == DRes{1, 0, 0x01}));
 
     let div_overflow_batch = [](Max left, Max right, Max carry_in = 0) -> Batch_Op_Result{
         mut out = make_big_int_with_size<T>(MAX_TYPE_SIZE_FRACTION<T> + 1);
