@@ -21,6 +21,14 @@ struct Span
 };
 */
 
+//@TODO: Implement div_overflow
+//@TODO: Document div_overflow (full proofs?)
+//@TODO: Make mul overflow low left
+//@TODO: Add aditional assert for right to div_overflow_low_carry
+//@TODO: Add sum div 0 optim
+//@TODO: Add define flags setting default
+//@TODO: Add conditional optim to div_overflow
+
 template <integral T>
 func high_mask(size_t index = HALF_BIT_SIZE<T>) -> T
 {
@@ -669,7 +677,7 @@ func div_overflow_low_carry(T left, T right, T carry_in = 0) -> Overflow<T>
     // 61 / 5 == 10 + 11 / 5 == 10 + 2 == 12
     // 
     //To go through this instinctive algorhitm we did the followig:
-    // {61/5} == [6/5]*10 + (6%1)*10 + {1/5} == 1*10 + {(10 + 1) / 5} == 10 + {11/5} == ... == 12
+    // {161/5} == [16/5]*10 + (16%5)*10 + {1/5} = 3*10 + {(10 + 1) / 5} == 30 + {11/5} == ... == 32 
     // where {} means normal (ie infinitely precise fraction) used for yet uncalculated division
 
     //this however only works for carry thats smaller than half bits 
@@ -768,6 +776,10 @@ func div_overflow(T left, T right, T carry_in = 0) -> Double_Overflow<T>
     //   = ( c - [c2*b / r]*r )*b^2 - b*r ~=!!!!=~ ( c - c2*b )*b^2 - b*r =
     //   = c1*b^2 - b*r = b*(c1*b - r) 
 
+
+    return Double_Overflow<T>{0, 0, 0};
+
+    /*
     const T b = 1 << HALF_BIT_SIZE<T>;
     const T c = carry_in;
     const T r = right;
@@ -777,16 +789,14 @@ func div_overflow(T left, T right, T carry_in = 0) -> Double_Overflow<T>
     const T c2 = high_bits(c);
 
     //@TODO: rewrite the comment after this function is finished
-    let c2bb_div_r_res = div_overflow_low_carry<T>(0, r, c2); //[c2,0] / r2 == c2*b^2 / r2
-    const T c2bb_div_r = c2bb_div_r_res.value;
-    const T c2bb_mod_r = c2bb_div_r_res.overflow;
+    let cb_div_r_res = div_overflow_low_carry<T>(c1*b, r, c2); //[c2,0] / r2 == c2*b^2 / r2
+    const T cb_div_r = c2bb_div_r_res.value;
+    const T cb_mod_r = c2bb_div_r_res.overflow;
 
-    const T x_c1 = (c1*b) / r;
-    const T x_c2 = c2bb_div_r;
+    const T x = cb_div_r;
 
     const T R_l = l;
-    const T R_c1 = (c1*b) % r;
-    const T R_c2 = c2bb_mod_r;
+    const T R_c = cb_mod_r;
 
     let x = add_overflow_any<T>(x_c1, x_c2);
     let R = add_overflow_any<T>(R_c1 * b, R_c2 * b, l); //overflow!!!
@@ -800,6 +810,7 @@ func div_overflow(T left, T right, T carry_in = 0) -> Double_Overflow<T>
     //it is both simpler and faster to not compute x and directly compute the final quotient
 
     return Double_Overflow<T>{quotient.value, quotient.overflow, remainder};
+    */
 }
 
 template <integral T, bool DO_OPTIMS = DO_DIV_OPTIMS>
