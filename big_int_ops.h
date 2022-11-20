@@ -1,6 +1,30 @@
 #pragma once
 
-#include "big_int.h"
+#include "preface.h"
+
+using Max_Unsigned_Type = u64;
+
+template <typename T>
+struct Trivial_Maybe
+{
+    bool has = false;
+    T value = T();
+
+    bool constexpr operator ==(Trivial_Maybe const&) const noexcept = default;
+};
+
+template <typename T>
+func wrap(T const& value) -> Trivial_Maybe<T>
+{
+    return Trivial_Maybe<T>{true, value};
+}
+
+template <typename T>
+func unwrap(Trivial_Maybe<T> const& maybe) -> T
+{
+    assert(maybe.has);
+    return maybe.value;
+}
 
 template <typename T>
 constexpr size_t BIT_SIZE = sizeof(T) * CHAR_BIT;
@@ -21,23 +45,34 @@ struct Span
 };
 */
 
-//@TODO: Implement div_overflow
-//@TODO: Document div_overflow (full proofs?)
-//@TODO: Make mul overflow low left
-//@TODO: Add aditional assert for right to div_overflow_low_carry
-//@TODO: Add sum div 0 optim
+//@TODO: Tidy up the div proc - move bit manipulation out
+//@TODO: Merge typed and utyped tests so that the typed part executes only when the supplied typed matches
+//@TODO: Figure out the smallest possible requirements for div
+//@TODO: Add alias checking function and alias check functions that donst support self assign
+//@TODO: Add asserts for aliasing that is either full or none
+//@TODO: Instantiate throwing versions of functions as well
+//@TODO: Insatntiate different optims
+//@TODO: Add more fine grained optim switches
+//@TODO: Create interface for parsing and printing functions (taking functions probably or returnign state to be executed repeatedly) 
+//@TODO: Hook to the existing parsing functions I have made
+//@TODO: Make Better multiply algorhitm
+//@TODO: Maybe just copy over 
 //@TODO: Add define flags setting default
-//@TODO: Add conditional optim to div_overflow
+//@TODO: Remove extra dependencies
+//@TODO: Make c++ 17 friendly (remove concepts add type asserts)
+//@TODO: Figure out param passing
+
+static constexpr bool DO_MUL_OPTIMS = true;
+static constexpr bool DO_DIV_OPTIMS = true;
+static constexpr bool DO_DEFAULT_THROW = true;
 
 template <integral T>
-func high_mask(size_t index = HALF_BIT_SIZE<T>) -> T
-{
+func high_mask(size_t index = HALF_BIT_SIZE<T>) -> T {
     return cast(T) (FULL_MASK<T> << index);
 }
 
 template <integral T>
-func low_mask(size_t index = HALF_BIT_SIZE<T>) -> T
-{
+func low_mask(size_t index = HALF_BIT_SIZE<T>) -> T {
     return cast(T) ~high_mask<T>(index);
 }
 
@@ -76,7 +111,7 @@ func integral_log2(T val) -> T
     }
     else
     {
-        static_assert(sizeof(T) <= 8 && "Higher integer sizes not supported");
+        assert(sizeof(T) <= 8 && "Higher integer sizes not supported");
         T  k = 0;
         if (val > 0xFFFFFFFFu) { val >>= 32; k |= 32; }
         if (val > 0x0000FFFFu) { val >>= 16; k |= 16; }
@@ -107,6 +142,7 @@ struct Batch_Overflow
     bool constexpr operator ==(Batch_Overflow const&) const noexcept = default;
 };
 
+
 template <integral T>
 func zeros_from_index(span<T> num) -> size_t
 {
@@ -130,23 +166,46 @@ func is_striped_form(span<T> num) -> bool
     return zeros_from_index(num) == num.size();
 }
 
-template <typename T>
-func as_number(span<T> nums) -> Max_Unsigned_Type
+template <integral Digit, integral Number>
+func digits_to_represent() -> size_t
 {
-    constexpr size_t rep_size = sizeof(Max_Unsigned_Type) / sizeof(T);
-
-    let stripped = striped_trailing_zeros(nums);
-
-    const size_t total_size = stripped.size() * sizeof(T);
-    assert(total_size <= sizeof(Max_Unsigned_Type));
-
-    Max_Unsigned_Type out = 0;
-    for(size_t i = 0; i < stripped.size(); i++)
-        out |= cast(Max_Unsigned_Type)(stripped[i]) << (i * sizeof(T) * CHAR_BIT);
-
-    return out;
+    return (sizeof(Digit) + sizeof(Number) - 1) / sizeof(Number);
 }
 
+template <integral To = Max_Unsigned_Type, integral T = u8>
+func to_number(span<T> bignum) -> Trivial_Maybe<To>
+{
+    let stripped = striped_trailing_zeros(bignum);
+
+    const size_t total_size = stripped.size() * sizeof(T);
+    if(total_size > sizeof(To))
+        return Trivial_Maybe<To>{false};
+
+    To out = 0;
+    for(size_t i = 0; i < stripped.size(); i++)
+        out |= cast(To)(stripped[i]) << (i * BIT_SIZE<T>);
+
+    return wrap<To>(out);
+}
+
+template <integral T, integral From = Max_Unsigned_Type>
+proc from_number(span<T>* bignum, From from) -> size_t
+{
+    constexpr size_t count = digits_to_represent<T, From>();
+    assert(bignum.size() >= count);
+
+    size_t i = 0;
+    for(; i < count; i++)
+    {
+        T curr_digit = from >> (i * BIT_SIZE<T>);
+        if(curr_digit == 0)
+            break;
+
+        (*bignum)[i] = cast(T) curr_digit;
+    }
+
+    return i;
+}
 
 //Both add and substract work by splittin each 'digit' (type T) in half 
 // and performing desired operation then using the possible oveflow as a carry
@@ -161,7 +220,6 @@ func as_number(span<T> nums) -> Max_Unsigned_Type
 // (except T = u8 but those will not be used for more than testing purposes (I hope))
 //
 //All this complexity could have been avoided if c++ had a proper standard instrinsics library.
-//  (and we would also get about 2x - 4x speedup)
 
 
 template <integral T>
@@ -275,7 +333,7 @@ func add_overflow_batch(span<T>* to, span<const T> left, span<const T> right, T 
 {
     assert(to->size() >= right.size());
     assert(to->size() >= left.size());
-    assert(carry_in == 1 || carry_in == 0);
+    assert(high_bits(carry_in) == 0);
 
     if(left.size() < right.size())
         std::swap(left, right);
@@ -303,7 +361,7 @@ func sub_overflow_batch(span<T>* to, span<const T> left, span<const T> right, T 
 {
     assert(to->size() >= right.size());
     assert(to->size() >= left.size());
-    assert(carry_in == 1 || carry_in == 0);
+    assert(high_bits(carry_in) == 0);
 
     T carry = carry_in;
     proc update = [&](size_t i, Overflow<T> oveflow) {
@@ -356,68 +414,6 @@ proc complement_overflow_batch(span<T>* to, span<const T> left, T carry_in = 1) 
 
     return Batch_Overflow<T>{left.size(), carry};
 }
-
-/*
-//shifts up by `by_bits` the `in` digits handling carry between the number. Can shift up by any number of bits even surpassing the
-// bit size of individual digits. Accepts carry_in which is shifted into the first (smallest) digit not completely shifted out. 
-// (ie when shifting by 9 span of u8's the shift can be though of as shifting one digit forward and then doing bitshift by 1 on the whole number again.
-//  The carry_in is used only for that bitshift not for digit shift)
-// Returns the last digits shifted out part as a carry (again with the same logic while shifting more than one digits bit size as with carry_in)
-template <integral T>
-func shift_up_overflow_batch(span<T>* out, span<const T> in, size_t by_bits, size_t out_bounds, T carry_in) -> Batch_Overflow<T>
-{
-    assert(out->size() >= out_bounds);
-    assert(out->size() >= in.size());
-    size_t shift_items_low = by_bits / BIT_SIZE<T>; 
-    size_t shift_items_high = div_round_up(by_bits, BIT_SIZE<T>);
-    size_t shift_bits = by_bits - shift_items_low * BIT_SIZE<T>;
-    size_t remaining_bits = BIT_SIZE<T> - shift_bits;
-    size_t to_index = min(out_bounds, in.size() + shift_items_high);
-
-    T high_item = 0;
-    T last_shifted = 0;
-    if(to_index >= shift_items_high + 1)
-    {
-        last_shifted = in[to_index - shift_items_high - 1];
-
-        //when we limit the written to index by out_bounds the first actually written digit still needs
-        // to have its upper half talken from somewhere. We in that case set it to the following item which happens
-        // to be the last_shifted. Again this only happens when the size is bound by out_bounds
-        if(to_index == out_bounds)
-            high_item = last_shifted;
-    }
-
-    for (size_t i = to_index; i-- > shift_items_high; )
-    {
-        T low_item = in[i - shift_items_high];
-
-        T high = low_bits(high_item, remaining_bits);
-        T low = high_bits(low_item, remaining_bits);
-
-        T composed = low | high << shift_bits;
-
-        (*out)[i] = composed;
-        high_item = low_item;
-    }
-
-    //we patch the first digit individually by 'shifting in' the carry_in 
-    {
-        T high = low_bits(high_item, remaining_bits);
-        T low = high_bits(carry_in, remaining_bits);
-
-        T composed = low | high << shift_bits;
-        (*out)[shift_items_low] = composed;
-    }
-
-    null_n(out->data(), min(out_bounds, shift_items_low));
-
-    //modulo for the rare case that we shift exactly by digits bit size
-    T carry_out = high_bits(last_shifted, remaining_bits % BIT_SIZE<T>);
-
-    return Batch_Overflow<T>{carry_out, out_bounds};
-}
-*/
-
 template <integral T>
 func shift_up_overflow(T low_item, size_t by_bits, T high_item) -> Overflow<T>
 {
@@ -545,12 +541,13 @@ func compare(span<const T> left, span<const T> right) -> int
 {
     assert(is_striped_form(left));
     assert(is_striped_form(right));
+    if(left.size() < right.size())
+        return -1;
 
-    int diff = cast(int) left.size() - cast(int) right.size();
-    if(diff != 0)
-        return diff;
+    if(left.size() > right.size())
+        return 1;
 
-    for(size_t i = 0; i < left.size(); i++)
+    for(size_t i = left.size(); i-- > 0;)
     {
         if(left[i] < right[i])
             return -1;
@@ -561,8 +558,14 @@ func compare(span<const T> left, span<const T> right) -> int
     return 0;
 }
 
+enum class Mul_Overflow_Optims
+{
+    NONE,
+    HIGH_BITS_ONLY,
+    LOW_BITS_ONLY,
+};
 
-template <integral T>
+template <integral T, Mul_Overflow_Optims OPTIMS = Mul_Overflow_Optims::NONE>
 func mul_overflow(T left, T right, T last_value = 0) -> Overflow<T>
 {
     //we do the oveflow multiplication by multiplying each digit normally and summing the overflow 
@@ -610,13 +613,37 @@ func mul_overflow(T left, T right, T last_value = 0) -> Overflow<T>
     T r2 = high_bits(r); 
 
     //calculate constants
-    T s_cur = l1*r1;
-    let s_mixed_ns = add_overflow<T>(l1*r2, l2*r1);
-    T s_next_ns = l2*r2;
+    T s_cur = 0;
+    T s_mixed_ns = 0;
+    T s_mixed_ns_overflow = 0;
+    T s_next_ns = 0;
+
+    //if we have either only low bits or high bits we dont have to do
+    // one carry addition and one multiplication. This is pretty big difference when dealing with really large numbers
+    // (there are also additional parts of the code that can be optimized away - such as shifting of s_mixed_ns_overflow etc...)
+    if constexpr(OPTIMS == Mul_Overflow_Optims::LOW_BITS_ONLY)
+    {
+        s_cur = l1*r1;
+        s_mixed_ns = l2*r1;
+    }
+    else if(OPTIMS == Mul_Overflow_Optims::HIGH_BITS_ONLY)
+    {
+        s_mixed_ns = l1*r2;
+        s_next_ns = l2*r2;
+    }
+    else
+    {
+        let s_mixed_ns_res = add_overflow<T>(l1*r2, l2*r1);
+
+        s_mixed_ns = s_mixed_ns_res.value;
+        s_mixed_ns_overflow = s_mixed_ns_res.overflow;
+        s_cur = l1*r1;
+        s_next_ns = l2*r2;
+    }
 
     //split mixed
-    T low_mixed = low_bits(s_mixed_ns.value) << h; // even though we are taking lower half of s_mixed we have to insert it to upper half
-    T high_mixed = high_bits(s_mixed_ns.value) + (s_mixed_ns.overflow << h); //add overflow as another digit
+    T low_mixed = low_bits(s_mixed_ns) << h; // even though we are taking lower half of s_mixed we have to insert it to upper half
+    T high_mixed = high_bits(s_mixed_ns) + (s_mixed_ns_overflow << h); //add overflow as another digit
 
     //distribute mixed to appropriate halves
     let curr_value = add_overflow_any<T>(s_cur, low_mixed, last_value); //also add last_value to save ops
@@ -631,17 +658,17 @@ func is_power_of_two(T num)
     return num != 0 && (num & (num - 1)) == 0;
 }
 
-static constexpr bool DO_MUL_OPTIMS = true;
-static constexpr bool DO_DIV_OPTIMS = true;
-
 template <integral T, bool DO_OPTIMS = DO_MUL_OPTIMS>
 proc mul_overflow_batch(span<T>* to, span<const T> left, T right, T carry_in = 0) -> Batch_Overflow<T>
 {
     assert(to->size() >= left.size());
 
+    //@TODO: Add more fine grained optim switches
+    //@TODO: rework default optim naming
     if(right == 0) 
         return Batch_Overflow<T>{0, 0};
 
+    T carry = carry_in;
     if constexpr(DO_OPTIMS)
     {
         if(right == 1)
@@ -655,9 +682,30 @@ proc mul_overflow_batch(span<T>* to, span<const T> left, T right, T carry_in = 0
             let shift_bits = integral_log2(right);
             return shift_up_overflow_batch(to, left, shift_bits);
         }
+
+        if(high_bits(right) == 0)
+        {
+            for (size_t i = 0; i < left.size(); i++)
+            {
+                let res = mul_overflow<T, Mul_Overflow_Optims::LOW_BITS_ONLY>(left[i], right, carry);
+                (*to)[i] = res.value;
+                carry = res.overflow;
+            }
+            return Batch_Overflow<T>{left.size(), carry};
+        }
+
+        if(low_bits(right) == 0)
+        {
+            for (size_t i = 0; i < left.size(); i++)
+            {
+                let res = mul_overflow<T, Mul_Overflow_Optims::HIGH_BITS_ONLY>(left[i], right, carry);
+                (*to)[i] = res.value;
+                carry = res.overflow;
+            }
+            return Batch_Overflow<T>{left.size(), carry};
+        }
     }
 
-    T carry = carry_in;
     for (size_t i = 0; i < left.size(); i++)
     {
         let res = mul_overflow<T>(left[i], right, carry);
@@ -670,9 +718,8 @@ proc mul_overflow_batch(span<T>* to, span<const T> left, T right, T carry_in = 0
 
 
 template <integral T>
-func div_overflow_low_carry(T left, T right, T carry_in = 0) -> Overflow<T>
+func div_overflow_low(T left, T right, T carry_in = 0) -> Overflow<T>
 {
-    
     //The algorhitm works as follows (only in different base - we use base 10 for demosntartion)
     // 61 / 5 == 10 + 11 / 5 == 10 + 2 == 12
     // 
@@ -680,10 +727,12 @@ func div_overflow_low_carry(T left, T right, T carry_in = 0) -> Overflow<T>
     // {161/5} == [16/5]*10 + (16%5)*10 + {1/5} = 3*10 + {(10 + 1) / 5} == 30 + {11/5} == ... == 32 
     // where {} means normal (ie infinitely precise fraction) used for yet uncalculated division
 
-    //this however only works for carry thats smaller than half bits 
+    //this however only works for carry and right thats smaller than half bits 
     // (else it doesnt get carried through properly through the modulos
-    //  so for example div_overflow_low_carry(0, 0xFF, 0xF0) should return 0xF0 but returns less) => assert
+    //  so for example div_overflow_low(0, 0xFF, 0xF0) should return 0xF0 but returns less) => assert
     assert(high_bits(carry_in) == 0 && "carry must be single digit");
+    assert(high_bits(right) == 0 && "right must be single digit");
+    assert(right != 0 && "cannot divide by zero");
 
     const T operand_high = combine_bits<T>(high_bits(left), carry_in);
     const T res_high = operand_high / right;
@@ -697,165 +746,213 @@ func div_overflow_low_carry(T left, T right, T carry_in = 0) -> Overflow<T>
     return Overflow<T>{res, out_carry};
 }
 
-template <integral T>
-struct Double_Overflow
+struct Div_Res
 {
-    T low;
-    T high;
-    T overflow;
-    
-    bool constexpr operator ==(Double_Overflow const&) const noexcept = default;
+    size_t quotient_size;
+    size_t remainder_size;
 };
 
-template <integral T>
-func div_overflow(T left, T right, T carry_in = 0) -> Double_Overflow<T>
+namespace detail
 {
-    //We try to prevent get carry to be only half bits and then call div_overflow_low_carry
+    template <integral T, bool DO_OPTIMS = DO_DIV_OPTIMS>
+    proc div_overflow_low_batch(span<T>* to, span<const T> left, T right, T carry_in = 0) -> Batch_Overflow<T>
+    {
+        assert(to->size() >= left.size());
+        assert(high_bits(right) == 0 && "only works for divisors under half bit size");
+        assert(right != 0 && "cannot divide by zero");
 
-    //we can imagine the problem as following:
-    // left: 00      =: l = l1 + l2*b
-    // right: 19     =: r = r1 + r2*b
-    // carry_in: 33  =: c = c1 + c2*b
-    // 
-    // where b is half bits base ie 2^HALF_BIT_SIZE<T> //(I will be using ^ operator to denote powers NOT xor)
-    // 
-    // => {33|00 / 19} == {3300 / 19}  <- this obviously cannot be calculated because we are using two cells for 3300
-    
-    // => we try to reduce it into form where we have: 
-    //   {3300 / 19} = W + {300 / 19} 
-    // which we can pass into div_overflow_low_carry 
-    // (it doesnt have to be exactly 300 (low_bits of carry_in) but any number that only has low_bits)
-    
-    // which means we are searching for some number `x` through which we can reduce carry_in by substarcting from it left x-times:
-    //   { c*b^2 - x*r <= c1*b^2 }
-    // in our example that is:
-    //   { 3300 - x*19 <= 300 } such x is 151 for example
-    // the condition could also just be { c*b^2 - x*l < b^3 } which is technically exactly what we want but the previous
-    //  condition is a lot easier (and faster) to implement since some of the terms nicely cancel out
-    // 
-    // x is a single slot number just like any other so: x = x1 + x2*b but we can freely choose x 
-    //  (condition is inequality) so if we let x1 = 0 we will always be able find x2 such that the condition is met
-    // this gives us: x = x2*b
-    //   { c*b^2 - x2*b*r <= c1*b^2 } 
-    //   <=> { c1*b^2 + c2*b^3 - x2*b*r <= c1*b^2 }
-    //   <=> { c2*b^3 - x2*b*r <= 0 }
-    //   <=> { c2*b^3 <= x2*b*r }
-    //   <=> { x2 >= (c2*b^3) / (b*r) = (c2*b^2) / r }
-    //   <=> { x2 >= c2*b / r * b } 
-    //   <=> x2 >= {c2*b / r} * b >= [c2*b / r] * b
-    //
-    //  where [ ] means ceil c2*b and r is now single slot
-    // 
-    //  we cant calculate ceil divison the standard way since it risks overflowing but we can always add 1 to the result
-    //   since that will never overflow: suppose c2 is the biggest it can be and r smallest it can be (non 0) 
-    //    => [c2*b / r] * b + 1 == [0xFF*b / 1] * b + 1 == 0xFF0000 + 1 == 0xFF0001 
-    //   (we used single byte base as demonstartion but this works with any base)
-    //   this gives us: x2 >= [c2*b / r] * b + 1
-    //
-    // such x2 (=> x) should give us proper carry_in we can pass into div_overflow_low_carry. 
-    //  We just have to remember to add the resulting x into the calculated quotient.
-    //
-    // We still however need to check if such x will not result in the carry_in being negative:
-    //   { c*b^2 - x*r >= 0 }    <=> { c*b^2 - x2*b*r >= 0 } 
-    //   <=> { c*b - x2*r >= 0 } <=> { c*b^2 >= x2*r }
-    //   <=> { x2 <= c*b^2 / r = c*b / r *b }
-    //   <=> x2 <= {c*b/r} * b 
-    //   <=> x2 <= [c*b/r] * b <= {c*b/r} * b 
-    //
-    // where [ ] means floor. 
-    //
-    // Here we ran into a problem since if c1 = 0:
-    //   [c2*b / r] * b + 1 <= x2 <= [c*b/r] * b == [c2*b / r] * b 
-    // which of course cant hold (notice the same expression on left and right)
-    // We will need to handle this case separately.
-    //
-    // let R := c*b^2 - x*r
-    // let x_ns = [c2*b / r]  //read as 'x not-shifted'
-    // R = c*b^2 - x*r = c*b^2 - x2*b*r = c*b^2 - ([c2*b / r] * b + 1)*b*r =
-    //   = c*b^2 - [c2*b / r]*b^2*r - b*r = c*b^2 - [c2*b / r]*r*b^2 - b*r =
-    //   = ( c - [c2*b / r]*r )*b^2 - b*r ~=!!!!=~ ( c - c2*b )*b^2 - b*r =
-    //   = c1*b^2 - b*r = b*(c1*b - r) 
+        if constexpr(DO_OPTIMS)
+        {
+            if(right == 1)
+            {
+                safe_copy_n(to->data(), left.data(), left.size());
+                return Batch_Overflow<T>{left.size(), 0}; 
+            }
+
+            if(is_power_of_two(right))
+            {
+                let shift_bits = integral_log2(right);
+                let shift_res = shift_down_overflow_batch(to, left, shift_bits);
+                //because of the way shifting down result is defined we have to process the reuslt
+                const T carry = shift_res.overflow >> (BIT_SIZE<T> - shift_bits);
+                return Batch_Overflow<T>{left.size(), carry};
+            }
+        }
+
+        T carry = carry_in;
+        for (size_t i = left.size(); i-- > 0; )
+        {
+            let res = div_overflow_low<T>(left[i], right, carry);
+            (*to)[i] = res.value;
+            carry = res.overflow;
+        }
+
+        return Batch_Overflow<T>{left.size(), carry};
+
+    }
+
+    template <integral T, bool DO_OPTIMS = DO_DIV_OPTIMS, bool DO_QUOTIENT = true>
+    proc div_bit_by_bit(span<T>* quotient, span<T>* remainder, span<const T> num, span<const T> den) -> Div_Res
+    {
+        assert(is_striped_form(num));
+        assert(is_striped_form(den));
+        assert(den.size() != 0 && "cannot divide by zero");
+
+        const size_t min_size = min(num.size(), den.size());
+        assert(remainder->size() >= min_size);
+        assert(quotient->size() >= min_size);
+
+        null_n(quotient->data(), quotient->size());
+        null_n(remainder->data(), remainder->size());
+
+        if(num.size() < den.size())
+        {
+            safe_copy_n(remainder->data(), num.data(), num.size());
+            return {0, num.size()};
+        }
+
+        if constexpr(DO_OPTIMS)
+        {
+            if(den.size() == 1 && high_bits(den.back()) == 0)
+            {
+                let div_res = div_overflow_low_batch<T, DO_OPTIMS>(quotient, num, den.back());
+                assert(remainder->size() > 0 && "at this point should be 0");
+
+                size_t remainder_size = 0;
+                if(div_res.overflow != 0)
+                {
+                    (*remainder)[0] = div_res.overflow;
+                    remainder_size = 1;
+                }
+
+                let stripped_quotient = striped_trailing_zeros<T>(*quotient);
+                return {stripped_quotient.size(), remainder_size};
+            }
+        }
+
+        constexpr let set_bit = [](T field, size_t bit_pos, T val) -> T {
+            assert(val == 0 || val == 1);
+
+            const T bit = val << bit_pos;
+            const T mask = cast(T) 1 << bit_pos;
+            const T res = (field & ~mask) | bit;
+            return res;
+        };
+
+        constexpr let get_bit = [](T field, size_t bit_pos) -> T {
+            return (field >> bit_pos) & 1u;
+        };
+
+        assert(set_bit(0b0001001, 1, 1) == 0b0001011);
+        assert(set_bit(0b0001001, 0, 1) == 0b0001001);
+        assert(set_bit(0b0001001, 0, 0) == 0b0001000);
+        assert(set_bit(0b0001001, 3, 0) == 0b0000001);
+        assert(get_bit(0b0001001, 0) == 1);
+        assert(get_bit(0b0001001, 1) == 0);
+        assert(get_bit(0b0001001, 2) == 0);
+        assert(get_bit(0b0001001, 3) == 1);
+
+        constexpr let set_nth_bit = [](span<T>* num, size_t i, T val = 1){
+            const size_t digit_i = i / BIT_SIZE<T>;
+            const size_t bit_i = i % BIT_SIZE<T>;
+
+            assert(digit_i < num->size());
+
+            T& digit = (*num)[digit_i];
+            digit = set_bit(digit, bit_i, val);
+        };
+
+        constexpr let get_nth_bit = [](span<const T> num, size_t i) -> T {
+            const size_t digit_i = i / BIT_SIZE<T>;
+            const size_t bit_i = i % BIT_SIZE<T>;
+
+            return get_bit(num[digit_i], bit_i);
+        };
+
+        //I am tired of thinking... I am just gonna copy some algorithm from wikipedia
+        span<T> curr_remainder = span<T>(remainder->data(), 0);
+        for(size_t i = BIT_SIZE<T> * num.size(); i-- > 0; ) 
+        {
+            let shift_res = shift_up_overflow_batch<T>(&curr_remainder, curr_remainder, 1);
+            const T num_ith_bit = get_nth_bit(num, i);
+
+            //this is very disgusting but I am tired
+            if(shift_res.overflow != 0 || (num_ith_bit == 1 && curr_remainder.size() == 0))
+            {
+                curr_remainder = span<T>(curr_remainder.data(), curr_remainder.size() + 1);
+                curr_remainder.back() = shift_res.overflow;
+
+                assert(curr_remainder.size() <= remainder->size() && "should not go over original remainder boundaries");
+            }
+            set_nth_bit(remainder, 0, num_ith_bit);
+
+            if(compare<T>(curr_remainder, den) >= 0)
+            {
+                let sub_res = sub_overflow_batch<T>(&curr_remainder, curr_remainder, den);
+                assert(sub_res.overflow == 0 && "should not overflow");
+                curr_remainder = striped_trailing_zeros<T>(curr_remainder); //for faster checks
+                
+                //in case we only want modulo
+                if constexpr(DO_QUOTIENT)
+                    set_nth_bit(quotient, i);
+            }
+        }
 
 
-    return Double_Overflow<T>{0, 0, 0};
+        let stripped_quotient = striped_trailing_zeros<T>(*quotient);
+        return {stripped_quotient.size(), curr_remainder.size()};
+    }
 
-    /*
-    const T b = 1 << HALF_BIT_SIZE<T>;
-    const T c = carry_in;
-    const T r = right;
-    const T l = left;
-
-    const T c1 = low_bits(c);
-    const T c2 = high_bits(c);
-
-    //@TODO: rewrite the comment after this function is finished
-    let cb_div_r_res = div_overflow_low_carry<T>(c1*b, r, c2); //[c2,0] / r2 == c2*b^2 / r2
-    const T cb_div_r = c2bb_div_r_res.value;
-    const T cb_mod_r = c2bb_div_r_res.overflow;
-
-    const T x = cb_div_r;
-
-    const T R_l = l;
-    const T R_c = cb_mod_r;
-
-    let x = add_overflow_any<T>(x_c1, x_c2);
-    let R = add_overflow_any<T>(R_c1 * b, R_c2 * b, l); //overflow!!!
-
-    assert(high_bits(R.overflow) == 0 && "remainder should not have any high bits after normalization step");
-
-    let reminder_quotient = div_overflow_low_carry<T>(R.value, r, R.overflow);
-    //let quotient = x + reminder_quotient.value;
-    let quotient = add_overflow_any<T>(x_c1, x_c2, reminder_quotient.value); 
-    let remainder = reminder_quotient.overflow;
-    //it is both simpler and faster to not compute x and directly compute the final quotient
-
-    return Double_Overflow<T>{quotient.value, quotient.overflow, remainder};
-    */
 }
 
-template <integral T, bool DO_OPTIMS = DO_DIV_OPTIMS>
-proc div_overflow_batch(span<T>* to, span<const T> left, T right, T carry_in = 0) -> Batch_Overflow<T>
+struct Divide_By_Zero_Exception{};
+
+template <integral T, bool DO_THROW = DO_DEFAULT_THROW, bool DO_OPTIMS = DO_DIV_OPTIMS>
+proc div_overflow_low_batch(span<T>* to, span<const T> left, T right, T carry_in = 0) -> std::conditional_t<DO_THROW, Batch_Overflow<T>, Trivial_Maybe<Batch_Overflow<T>>>
 {
-    assert(to->size() >= left.size());
-    assert(high_bits(right) == 0 && "only works for divisors under half bit size");
+    using Maybe = Trivial_Maybe<Batch_Overflow<T>>;
 
-    //decide how to handle this
-    if(right == 0) 
-        return Batch_Overflow<T>{0, 0};
-
-    if constexpr(DO_OPTIMS)
+    if(right == 0)
     {
-        if(right == 1)
-        {
-            safe_copy_n(to->data(), left.data(), left.size());
-            return Batch_Overflow<T>{left.size(), 0}; 
-        }
-
-        if(is_power_of_two(right))
-        {
-            let shift_bits = integral_log2(right);
-            let shift_res = shift_down_overflow_batch(to, left, shift_bits);
-            //because of the way shifting down result is defined we have to process the reuslt
-            const T carry = shift_res.overflow >> (BIT_SIZE<T> - shift_bits);
-            return Batch_Overflow<T>{left.size(), carry};
-        }
+        if constexpr(DO_THROW)
+            throw Divide_By_Zero_Exception{};
+        else
+            return Maybe{false};
     }
 
-    T carry = carry_in;
-    for (size_t i = left.size(); i-- > 0; )
+    let res = detail::div_overflow_low_batch<T, DO_OPTIMS>(to, left, right, carry_in);
+    if constexpr(DO_THROW)
+        return res;
+    else
+        return Maybe{true, res};
+}
+
+template <integral T, bool DO_THROW = DO_DEFAULT_THROW, bool DO_OPTIMS = DO_DIV_OPTIMS>
+proc div_bit_by_bit(span<T>* quotient, span<T>* remainder, span<const T> left, span<const T> right) -> std::conditional_t<DO_THROW, Div_Res, Trivial_Maybe<Div_Res>>
+{
+    using Maybe = Trivial_Maybe<Div_Res>;
+    assert(is_striped_form(right));
+    if(right.size() == 0)
     {
-        let res = div_overflow_low_carry<T>(left[i], right, carry);
-        (*to)[i] = res.value;
-        carry = res.overflow;
+        if constexpr(DO_THROW)
+            throw Divide_By_Zero_Exception{};
+        else
+            return Maybe{false};
     }
 
-    return Batch_Overflow<T>{left.size(), carry};
-    
+    let res = detail::div_bit_by_bit<T, DO_OPTIMS>(quotient, remainder, left, right);
+    if constexpr(DO_THROW)
+        return res;
+    else
+        return Maybe{true, res};
 }
 
 template <integral T>
 proc mul_quadratic(span<T>* to, span<T>* temp, span<const T> left, span<const T> right) -> void
 {
+    if(left.size() < right.size())
+        std::swap(left, right);
+
     size_t max_result_size = left.size() + right.size() + 1;
     assert(to->size() >= max_result_size);
     assert(temp->size() >= right.size() + 1);
@@ -880,6 +977,9 @@ proc mul_quadratic(span<T>* to, span<T>* temp, span<const T> left, span<const T>
 template <integral T>
 proc mul_quadratic_fused(span<T>* to, span<const T> left, span<const T> right) -> void
 {
+    if(left.size() < right.size())
+        std::swap(left, right);
+
     size_t max_result_size = left.size() + right.size() + 1;
     assert(to->size() >= max_result_size);
     null_n(to->data(), to->size());
@@ -899,7 +999,6 @@ proc mul_quadratic_fused(span<T>* to, span<const T> left, span<const T> right) -
                 assert(add_res.overflow == 0); //no carry should happen in this case
                 continue;
             }
-
         }
 
         T mul_carry = 0;
@@ -932,7 +1031,18 @@ proc mul_quadratic_fused(span<T>* to, span<const T> left, span<const T> right) -
     }
 }
 
-template <integral From, integral To>
-proc to_base(span<const From> num, span<To>* to, size_t base, let conversion_func)
-{
-}
+//template <integral From, integral To>
+//proc to_base(span<const From> num, span<From*> div_temp1, span<From*> div_temp2, span<From*> remainder_temp, span<To>* to, size_t base, let conversion_func)
+//{
+//    constexpr size_t item_count = digits_to_represent<From, size_t>();
+//    
+//    From base_rep_arr[item_count];
+//    span<From> whole_base_rep = base_rep_arr;
+//
+//    const size_t required_size = from_number(&whole_base_rep, base);
+//    const span<From> base_rep = span<From>(base_rep_arr, required_size)
+//
+//
+//
+//    //10541 -> 1054 | 1
+//}

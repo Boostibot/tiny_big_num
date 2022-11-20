@@ -1,6 +1,6 @@
 #pragma once
 
-#include "preface.h"
+#include "big_int_ops.h"
 
 template <typename Grow>
 concept grower = requires(size_t to_fit, size_t capacity, size_t size, size_t static_capacity, size_t elem_size)

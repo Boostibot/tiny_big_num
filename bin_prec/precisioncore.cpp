@@ -2082,19 +2082,26 @@ std::vector<iptype> _int_precision_udiv(const std::vector<iptype> *src1, const s
 
 	plusbits = (int)_int_precision_clz(src2->back())- (int)_int_precision_clz(divisor.back()) ;
 	plusbits=plusdigit * Bitsiptype + plusbits;
+	//plusbits = `diff of positions of the most significant bits`
 	for(i=0; plusbits >= 1 ; ++i) 
-		{
+	{
+		//shift out the ammount of bits
 		tmp = _int_precision_ushiftleft(src2, plusbits);
+
 		if (_int_precision_compare(&divisor, &tmp) < 0)
-			{ // Too much reduce with one power of radix
+		{ // Too much reduce with one power of radix
 			--plusbits; continue;
-			}
+		}
 		divisor = _int_precision_usub(&wrap, &divisor, &tmp);
+		
+		//make quotient such that 10|0000|0000
+		//                         <--------->
+		//							 plusbits
 		quotient.clear();
 		quotient.insert(quotient.begin(), (plusbits / Bitsiptype ) + 1, 0);
 		quotient[quotient.size() - 1] = (iptype)(1) << (plusbits % Bitsiptype );
 		des = _int_precision_uadd(&des, &quotient);
-		}
+	}
 
 	for (wrap = 0; wrap == 0; )
 		{
