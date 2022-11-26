@@ -11,7 +11,6 @@
 #include "big_int.h"
 #include "big_int_ops.h"
 
-
 using Random_Generator = std::mt19937;
 
 struct Batch_Op_Result
@@ -38,31 +37,118 @@ runtime_func make_max_distribution() -> std::uniform_int_distribution<Max_Unsign
     return std::uniform_int_distribution<Max_Unsigned_Type>(0, std::numeric_limits<Max_Unsigned_Type>::max());;
 }
 
+template <typename T>
+struct Padded_Big_Int
+{
+    Big_Int_<T> big_int;
+    Slice<T> num;
+    Slice<T> whole_num;
+    size_t before_digits;
+    size_t after_digits;
+};
+
+template <typename T>
+func make_padded_big_int(Max_Unsigned_Type val, size_t to_size, size_t before_digits, size_t after_digits) -> Padded_Big_Int<T>
+{
+    Big_Int_<T> big;
+    size_t raw_digits = max(digits_to_represent<T, Max_Unsigned_Type>(), to_size);
+    resize(&big, raw_digits + before_digits + after_digits);
+
+    Slice<T> whole_num = big;
+    Slice<T> from_start = slice(whole_num, before_digits);
+    Slice<T> converted = from_number(&from_start, val);
+
+    return Padded_Big_Int<T>{
+        std::move(big),
+        converted,
+        whole_num,
+        before_digits, 
+        after_digits
+    };
+}
+
+template <typename T>
+func make_padded_big_int(Max_Unsigned_Type val, size_t before_digits = 1, size_t after_digits = 1) -> Padded_Big_Int<T>
+{
+    return make_padded_big_int<T>(val, 0, before_digits, after_digits);
+}
+
+proc test_misc()
+{
+    using T = u32;
+    using Res_S = Overflow<T>;
+    using Max = Max_Unsigned_Type;
+
+    assert(integral_log2<Max>(0) == 0);
+    assert(integral_log2<Max>(1) == 0);
+    assert(integral_log2<Max>(2) == 1);
+    assert(integral_log2<Max>(3) == 1);
+    assert(integral_log2<Max>(4) == 2);
+    assert(integral_log2<Max>(7) == 2);
+    assert(integral_log2<Max>(8) == 3);
+    assert(integral_log2<Max>(76) == 6);
+    assert(integral_log2<Max>(513) == 9);
+    assert(integral_log2<Max>(641) == 9);
+    assert(integral_log2<Max>(1024) == 10);
+
+    assert(high_mask<u8>() == 0xF0);
+    assert(high_mask<u8>(2) == 0b1111'1100);
+    assert(high_mask<u8>(5) == 0b1110'0000);
+    assert(high_mask<u16>() == 0xFF00);
+    assert(high_mask<u32>() == 0xFFFF0000);
+    assert(high_mask<u64>() == 0xFFFFFFFF00000000);
+
+    assert(low_mask<u8>() == 0x0F);
+    assert(low_mask<u8>(2) == 0b0000'0011);
+    assert(low_mask<u8>(5) == 0b0001'1111);
+    assert(low_mask<u16>() == 0x00FF);
+    assert(low_mask<u32>() == 0x0000FFFF);
+    assert(low_mask<u64>() == 0x00000000FFFFFFFF);
+
+    assert(low_bits<u32>(0b1010'1100'0001, 1) == 1);
+    assert(low_bits<u32>(0b1010'1100'0001, 2) == 1);
+    assert(low_bits<u32>(0b1010'1100'0001, 4) == 1);
+    assert(low_bits<u32>(0b1010'1100'0001, 6) == 1);
+    assert(low_bits<u32>(0b1010'1100'0001, 8) == 0b1100'0001);
+    assert(low_bits<u32>(1, 16) == 1);
+    assert(low_bits<u32>(1, 7) == 1);
+    assert(low_bits<u32>(1, 8) == 1);
+}
 
 proc test_add_overflow()
 {
     using Max = Max_Unsigned_Type;
     using Res = Batch_Op_Result;
-    using Big = Big_Int_<u8>;
+    using T = u8;
+    using Big = Big_Int_<T>;
 
     let add_overflow_batch = [](Max left_, Max right_, Max carry_in = 0) -> Batch_Op_Result{
         Big left = left_;
         Big right = right_;
 
-        mut out = make_big_int_with_size<u8>(MAX_TYPE_SIZE_FRACTION<u8> + 1);
-        span<u8> out_s = out;
-        span<u8> self_s = left.size > right.size ? left : right;
+        mut pad_left = make_padded_big_int<T>(left_);
+        mut pad_right = make_padded_big_int<T>(right_);
 
-        let res1 = ::add_overflow_batch<u8>(&out_s, left, right, cast(u8) carry_in);
-        let res2 = ::add_overflow_batch<u8>(&self_s, left, right, cast(u8) carry_in);
+        mut out = make_big_int_with_size<T>(MAX_TYPE_SIZE_FRACTION<T> + 1);
+        Slice<T> out_s = out;
+        Slice<T> pad_left_s = pad_left.whole_num;
+        Slice<T> pad_right_s = pad_right.whole_num;
 
-        let num1 = unwrap(to_number(out_s.subspan(0, res1.size)));
-        let num2 = unwrap(to_number(self_s.subspan(0, res2.size)));
+        let res1 = ::add_overflow_batch<T>(&out_s, left, right, cast(T) carry_in);
+        let res2 = ::add_overflow_batch<T>(&pad_left_s, pad_left.num, right, cast(T) carry_in);
+        let res3 = ::add_overflow_batch<T>(&pad_right_s, left, pad_right.num, cast(T) carry_in);
 
-        assert(res1 == res2 && "self assign must work correctly");
-        assert(num1 == num2 && "self assign must work correctly");
+        let num1 = unwrap(to_number(res1.slice));
+        let num2 = unwrap(to_number(res2.slice));
+        let num3 = unwrap(to_number(res3.slice));
+
+        assert(res1.slice.size == res2.slice.size 
+            && res1.slice.size == res3.slice.size 
+            && "self assign must work correctly");
+        assert(num1 == num2 && num1 == num3 && "self assign must work correctly");
+        assert(res1.overflow == res2.overflow && res1.overflow == res3.overflow);
         return Batch_Op_Result{num1, res1.overflow};
-            };
+    };
 
     assert((add_overflow_batch(0, 0) == Res{0, 0}));
     assert((add_overflow_batch(0, 1) == Res{1, 0}));
@@ -94,19 +180,20 @@ proc test_sub_overflow()
         Big right = right_;
 
         mut out = make_big_int_with_size<T>(MAX_TYPE_SIZE_FRACTION<T> + 1);
-        span<T> out_s = out;
-        span<u8> self_s = left.size > right.size ? left : right;
+        mut pad_left = make_padded_big_int<T>(left_);
+        Slice<T> out_s = out;
+        Slice<T> pad_left_s = pad_left.whole_num;
 
         let res1 = ::sub_overflow_batch<u8>(&out_s, left, right, cast(u8) carry_in);
-        let res2 = ::sub_overflow_batch<u8>(&self_s, left, right, cast(u8) carry_in);
+        let res2 = ::sub_overflow_batch<u8>(&pad_left_s, pad_left.num, right, cast(u8) carry_in);
 
-        let num1 = unwrap(to_number(out_s.subspan(0, res1.size)));
-        let num2 = unwrap(to_number(self_s.subspan(0, res2.size)));
+        let num1 = unwrap(to_number(res1.slice));
+        let num2 = unwrap(to_number(res2.slice));
 
-        assert(res1 == res2 && "self assign must work correctly");
+        assert(res1.slice.size == res2.slice.size && "self assign must work correctly");
         assert(num1 == num2 && "self assign must work correctly");
         return Batch_Op_Result{num1, res1.overflow};
-            };
+    };
 
     assert((sub_overflow_batch(0, 0) == Res{0, 0}));
     assert((sub_overflow_batch(1, 0) == Res{1, 0}));
@@ -117,7 +204,6 @@ proc test_sub_overflow()
     assert((sub_overflow_batch(0xFF0000, 0x000001) == Res{0xFEFFFF, 0}));
     assert((sub_overflow_batch(0x000000, 0x000001) == Res{0xFF, 1}));
     assert((sub_overflow_batch(0xFF0000, 0x0000FF) == Res{0xFEFF01, 0}));
-
 
     assert((sub_overflow_batch(0xFFFF, 0xFF) == Res{0xFF00, 0}));
     assert((sub_overflow_batch(0xFFFE, 0xFF) == Res{0xFEFF, 0}));
@@ -136,23 +222,24 @@ proc test_complement_overflow()
 
     //we dont test oveflow of this op 
     let complement_overflow_batch = [](Max left_, Max carry_in = 1) -> Max{
-        Big left = left_;
-
         mut out = make_big_int_with_size<T>(MAX_TYPE_SIZE_FRACTION<T> + 1);
-        span<T> out_s = out;
-        span<u8> left_s = left;
+        mut pad_left = make_padded_big_int<T>(left_);
 
-        let res1 = ::complement_overflow_batch<T>(&out_s, left, cast(T) carry_in);
-        let res2 = ::complement_overflow_batch<T>(&left_s, left, cast(T) carry_in);
+        Slice<T> out_s = out;
+        Slice<T> left_s = pad_left.num;
+        Slice<T> pad_left_s = pad_left.whole_num;
 
-        let num1 = unwrap(to_number(out_s.subspan(0, res1.size)));
-        let num2 = unwrap(to_number(left_s.subspan(0, res2.size)));
+        let res1 = ::complement_overflow_batch<T>(&out_s, left_s, cast(T) carry_in);
+        let res2 = ::complement_overflow_batch<T>(&pad_left_s, left_s, cast(T) carry_in);
 
-        assert(res1 == res2 && "self assign must work correctly");
+        let num1 = unwrap(to_number(res1.slice));
+        let num2 = unwrap(to_number(res2.slice));
+
+        assert(res1.slice.size == res2.slice.size && "self assign must work correctly");
         assert(num1 == num2 && "self assign must work correctly");
 
         return num1;
-            };
+    };
 
     assert(complement_overflow_batch(0) == 0);
     assert(complement_overflow_batch(1) == cast(u8)(-1));
@@ -162,7 +249,6 @@ proc test_complement_overflow()
     assert(complement_overflow_batch(0xFFFF0000) == cast(u32)(-cast(i64)0xFFFF0000));
 }
 
-
 proc test_shift_overflow()
 {
     using T = u8;
@@ -171,35 +257,60 @@ proc test_shift_overflow()
     using Big = Big_Int_<T>;
 
 
-    constexpr let shift_both = [](Max left_, Max right, Max carry_in, bool up_down) -> Batch_Op_Result{
-        Big left = left_;
-
+    constexpr let shift_both = [](Max left_, Max right, Max carry_in, bool up_down, Iter_Direction direction) -> Batch_Op_Result{
+        mut pad_left = make_padded_big_int<T>(left_, 1, 1);
         mut out = make_big_int_with_size<T>(MAX_TYPE_SIZE_FRACTION<T> + 1);
-        span<T> out_s = out;
-        span<u8> left_s = left;
+        Slice<T> out_s = out;
+        Slice<T> left_s = pad_left.num;
+        Slice<T> pad_left_s;
 
-        let res1 = up_down 
-            ? ::shift_up_overflow_batch<T>(&out_s, left, right, cast(T) carry_in)
-            : ::shift_down_overflow_batch<T>(&out_s, left, right, cast(T) carry_in);
-        let res2 = up_down 
-            ? ::shift_up_overflow_batch<T>(&left_s, left, right, cast(T) carry_in)
-            : ::shift_down_overflow_batch<T>(&left_s, left, right, cast(T) carry_in);
+        if(direction == Iter_Direction::FORWARD)
+            pad_left_s = pad_left.whole_num;
+        else
+            pad_left_s = slice(pad_left.whole_num, 2);
 
-        let num1 = unwrap(to_number(out_s.subspan(0, res1.size)));
-        let num2 = unwrap(to_number(left_s.subspan(0, res2.size)));
+        Batch_Overflow<T> res1;
+        Batch_Overflow<T> res2;
 
-        assert(res1 == res2 && "self assign must work correctly");
+        if(up_down)
+        {
+            res1 = ::shift_up_overflow_batch<T>(&out_s, left_s, right, cast(T) carry_in, direction);
+            res2 = ::shift_up_overflow_batch<T>(&pad_left_s, left_s, right, cast(T) carry_in, direction);
+        }
+        else
+        {
+            res1 = ::shift_down_overflow_batch<T>(&out_s, left_s, right, cast(T) carry_in, direction);
+            res2 = ::shift_down_overflow_batch<T>(&pad_left_s, left_s, right, cast(T) carry_in, direction);
+        }
+
+        let num1 = unwrap(to_number(res1.slice));
+        let num2 = unwrap(to_number(res2.slice));
+
+        assert(res1.slice.size == res2.slice.size && "self assign must work correctly");
+        assert(res1.overflow == res2.overflow);
         assert(num1 == num2 && "self assign must work correctly");
 
         return Batch_Op_Result{num1, res1.overflow};
-            };
+    };
 
     constexpr let shift_up_overflow_batch = [](Max left, Max right, Max carry_in = 0) -> Batch_Op_Result{
-        return shift_both(left, right, carry_in, true);
+        let forward = shift_both(left, right, carry_in, true, Iter_Direction::FORWARD);
+        let backward = shift_both(left, right, carry_in, true, Iter_Direction::BACKWARD);
+
+        assert(forward.value == backward.value);
+        assert(forward.overflow == backward.overflow);
+
+        return forward;
     };
 
     constexpr let shift_down_overflow_batch = [](Max left, Max right, Max carry_in = 0) -> Batch_Op_Result{
-        return shift_both(left, right, carry_in, false);
+        let forward = shift_both(left, right, carry_in, false, Iter_Direction::FORWARD);
+        let backward = shift_both(left, right, carry_in, false, Iter_Direction::BACKWARD);
+
+        assert(forward.value == backward.value);
+        assert(forward.overflow == backward.overflow);
+
+        return forward;
     };
 
     assert((shift_up_overflow_batch(0, 0, 0) == Res{0, 0}));
@@ -213,6 +324,7 @@ proc test_shift_overflow()
     assert((shift_up_overflow_batch(0xAB, 0x4, 0xD0) == Res{0xBD, 0xA}));
     assert((shift_up_overflow_batch(0xAB, 0x4, 0x0D) == Res{0xB0, 0xA}));
     assert((shift_up_overflow_batch(0b0101'0101'0111'0001, 7) == Res{0b1011'1000'1000'0000, 0b010'1010}));
+    assert((shift_up_overflow_batch(0b0101'0101'0111'0001, 0) == Res{0b0101'0101'0111'0001, 0}));
     assert((shift_up_overflow_batch(0b0101'0101'0111'0001, 7, 0b11001100) == Res{0b1011'1000'1110'0110, 0b010'1010}));
 
     assert((shift_down_overflow_batch(0, 0, 0) == Res{0, 0}));
@@ -224,6 +336,7 @@ proc test_shift_overflow()
     assert((shift_down_overflow_batch(0b0101'0011, 1) == Res{0b101001, 0x80}));
     assert((shift_down_overflow_batch(0b0101'0011, 4) == Res{0b101, 0b0011'0000}));
     assert((shift_down_overflow_batch(0b0101'0011, 4, 0b0000'1111) == Res{0b1111'0101, 0b0011'0000}));
+    assert((shift_down_overflow_batch(0b0101'0011, 0) == Res{0b0101'0011, 0}));
     assert((shift_down_overflow_batch(0b0101'0011, 7) == Res{0b0, 0b10100110}));
     assert((shift_down_overflow_batch(0b0101'0011, 7, 0b1100'0111) == Res{0b1000'1110, 0b10100110}));
     assert((shift_down_overflow_batch(0xFFEEDD, 4) == Res{0x0FFEED, 0xD0}));
@@ -231,7 +344,6 @@ proc test_shift_overflow()
     assert((shift_down_overflow_batch(0b0101010101110001, 5) == Res{0b0000001010101011, 0b10001000}));
     assert((shift_down_overflow_batch(0b0101010101110001, 5, 0b1010'1111) == Res{0b0111101010101011, 0b10001000}));
 }
-
 
 proc test_mul_overflow()
 {
@@ -241,23 +353,24 @@ proc test_mul_overflow()
     using Big = Big_Int_<T>;
 
     let mul_overflow_batch = [](Max left_, Max right, Max carry_in = 0) -> Batch_Op_Result{
-        Big left = left_;
-
+        mut pad_left = make_padded_big_int<T>(left_);
         mut out = make_big_int_with_size<T>(MAX_TYPE_SIZE_FRACTION<T> + 1);
-        span<T> out_s = out;
-        span<u8> left_s = left;
+        
+        Slice<T> out_s = out;
+        Slice<T> left_s = pad_left.num;
+        Slice<T> pad_left_s = pad_left.whole_num;
 
-        let res1 = ::mul_overflow_batch<T>(&out_s, left, cast(T) right, cast(T) carry_in);
-        let res2 = ::mul_overflow_batch<T>(&left_s, left, cast(T) right, cast(T) carry_in);
+        let res1 = ::mul_overflow_batch<T>(&out_s, left_s, cast(T) right, cast(T) carry_in);
+        let res2 = ::mul_overflow_batch<T>(&pad_left_s, left_s, cast(T) right, cast(T) carry_in);
 
-        let num1 = unwrap(to_number(out_s.subspan(0, res1.size)));
-        let num2 = unwrap(to_number(left_s.subspan(0, res2.size)));
+        let num1 = unwrap(to_number(res1.slice));
+        let num2 = unwrap(to_number(res2.slice));
 
-        assert(res1 == res2 && "self assign must work correctly");
+        assert(res1.slice.size == res2.slice.size && "self assign must work correctly");
         assert(num1 == num2 && "self assign must work correctly");
 
         return Batch_Op_Result{num1, res1.overflow};
-            };
+    };
 
     //@TODO: add automated tests
     assert((mul_overflow_batch(0, 0) == Res{0, 0}));
@@ -285,19 +398,24 @@ proc test_div_overflow_low()
     assert((div_overflow_low<T>(0x12, 0x0A, 0) == SRes{1, 0x08}));
 
     let div_overflow_low_batch = [](Max left_, Max right, Max carry_in = 0) -> Batch_Op_Result{
-        Big left = left_;
+        constexpr size_t padding_before = 2;
 
+        mut pad_left = make_padded_big_int<T>(left_, padding_before, MAX_TYPE_SIZE_FRACTION<T>);
         mut out = make_big_int_with_size<T>(MAX_TYPE_SIZE_FRACTION<T> + 1);
-        span<T> out_s = out;
-        span<u8> left_s = left;
 
-        let res1 = ::div_overflow_low_batch<T>(&out_s, left, cast(T) right, cast(T) carry_in);
-        let res2 = ::div_overflow_low_batch<T>(&left_s, left, cast(T) right, cast(T) carry_in);
+        Slice<T> out_s = out;
+        Slice<T> left_s = pad_left.num;
+        Slice<T> pad_left_s = slice<T>(pad_left.whole_num, padding_before + 1);
 
-        let num1 = unwrap(to_number(out_s.subspan(0, res1.size)));
-        let num2 = unwrap(to_number(left_s.subspan(0, res2.size)));
+        assert(unwrap(to_number(left_s)) == left_);
 
-        assert(res1 == res2 && "self assign must work correctly");
+        let res1 = ::div_overflow_low_batch<T>(&out_s, left_s, cast(T) right, cast(T) carry_in);
+        let res2 = ::div_overflow_low_batch<T>(&pad_left_s, left_s, cast(T) right, cast(T) carry_in);
+
+        let num1 = unwrap(to_number(res1.slice));
+        let num2 = unwrap(to_number(res2.slice));
+
+        assert(res1.slice.size == res2.slice.size && "self assign must work correctly");
         assert(num1 == num2 && "self assign must work correctly");
 
         return Batch_Op_Result{num1, res1.overflow};
@@ -327,21 +445,22 @@ runtime_proc test_untyped_add_carry(Random_Generator* generator, size_t random_r
     let auto_test_add = [](Max left, Max right, Max carry_in = 0) -> bool {
         using Big = Big_Int_<T>;
         let numeric_add_res = add_overflow<Max>(left, right, carry_in);
-        mut out = make_big_int_with_size<T>(MAX_TYPE_SIZE_FRACTION<T> + 1);
-        span<T> out_s = out;
+        mut pad_left = make_padded_big_int<T>(left, 2, MAX_TYPE_SIZE_FRACTION<T>);
+        Slice<T> left_s = pad_left.num;
+        Slice<T> out_s = pad_left.whole_num;
 
-        let big_add_res = ::add_overflow_batch<T>(&out_s, Big{left}, Big{right}, cast(T) carry_in);
+        let big_add_res = ::add_overflow_batch<T>(&out_s, left_s, Big{right}, cast(T) carry_in);
 
         Max adjusted_overflow = big_add_res.overflow;
-        Max adjusted_value = unwrap(to_number(out_s));
-        if(big_add_res.size != MAX_TYPE_SIZE_FRACTION<T>)
+        Max adjusted_value = unwrap(to_number(big_add_res.slice));
+        if(big_add_res.slice.size != MAX_TYPE_SIZE_FRACTION<T>)
         {
-            adjusted_value += cast(Max) big_add_res.overflow << (big_add_res.size * BIT_SIZE<T>);
+            adjusted_value += cast(Max) big_add_res.overflow << (big_add_res.slice.size * BIT_SIZE<T>);
             adjusted_overflow = 0;
         }
 
         return numeric_add_res.value == adjusted_value && numeric_add_res.overflow == adjusted_overflow;
-            };
+    };
 
     assert(auto_test_add(0xFF, 0xFF));
     assert(auto_test_add(0xFFFF'FFFF'FFFF'FFFF, 0xFFFF'FFFF'FFFF'FFFF));
@@ -368,17 +487,19 @@ runtime_proc test_mul_quadratic(Random_Generator* generator, size_t random_runs)
     using Res = Batch_Op_Result;
     using Big_Int = Big_Int_<T>;
 
-    let test_mul_quadratic = [](Big_Int left, Big_Int right, Max expected) -> bool{
+    let test_mul_quadratic = [](Max left_, Max right_, Max expected) -> bool{
+        Big_Int left = left_;
+        Big_Int right = right_;
         Big_Int res;
         Big_Int temp;
 
         resize(&temp, max(left.size, right.size) + 1);
         resize(&res, left.size + right.size + 1);
 
-        span<T> res_s = res;
-        span<T> temp_s = temp;
-        span<const T> left_s = left;
-        span<const T> right_s = right;
+        Slice<T> res_s = res;
+        Slice<T> temp_s = temp;
+        Slice<const T> left_s = left;
+        Slice<const T> right_s = right;
 
         ::mul_quadratic<T>(&res_s, &temp_s, left_s, right_s);
         let normal = unwrap(to_number(res_s));
@@ -387,7 +508,7 @@ runtime_proc test_mul_quadratic(Random_Generator* generator, size_t random_runs)
         let fused = unwrap(to_number(res_s));
 
         return expected == normal && expected == fused;
-            };
+    };
 
 
     let auto_test_mul_quadratic = [=](Max left, Max right) -> bool
@@ -399,6 +520,7 @@ runtime_proc test_mul_quadratic(Random_Generator* generator, size_t random_runs)
         Max adjusted_res = adjusted_left * right;
         return test_mul_quadratic(adjusted_left, right, adjusted_res);
     };
+
 
     assert(test_mul_quadratic(0, 0, 0));
     assert(test_mul_quadratic(1, 0, 0));
@@ -448,12 +570,12 @@ runtime_proc test_div_bit_by_bit(Random_Generator* generator, size_t random_runs
         resize(&rem, max(left.size, right.size));
         resize(&res, max(left.size, right.size));
 
-        span<T> res_s = res;
-        span<T> rem_s = rem;
-        span<const T> left_s = left;
-        span<const T> right_s = right;
+        Slice<T> res_s = res;
+        Slice<T> rem_s = rem;
+        Slice<const T> left_s = left;
+        Slice<const T> right_s = right;
 
-        let div_res = ::div_bit_by_bit<T, false>(&res_s, &rem_s, left_s, right_s);
+        let div_res = ::div_bit_by_bit<T>(&res_s, &rem_s, left_s, right_s);
         if(expected_fail == FAIL)
             return div_res.has == false;
 
@@ -510,12 +632,13 @@ runtime_proc test_div_bit_by_bit(Random_Generator* generator, size_t random_runs
 
 runtime_proc run_typed_tests()
 {
+    test_misc();
     test_add_overflow();
     test_complement_overflow();
     test_sub_overflow();
+    test_shift_overflow();
     test_mul_overflow();
     test_div_overflow_low();
-    test_shift_overflow();
 }
 
 template <integral T>
@@ -532,11 +655,11 @@ runtime_proc run_tests()
     const u32 seed = os_seed();
 
     Random_Generator generator(seed);
-    const size_t random_runs = 100;
+    const size_t random_runs = 10000;
 
     run_typed_tests();
-    run_untyped_tests<u8>(&generator, random_runs);
-    run_untyped_tests<u16>(&generator, random_runs);
+    //run_untyped_tests<u8>(&generator, random_runs);
+    //run_untyped_tests<u16>(&generator, random_runs);
     run_untyped_tests<u32>(&generator, random_runs);
     run_untyped_tests<u64>(&generator, random_runs);
 }

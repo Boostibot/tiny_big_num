@@ -1,11 +1,9 @@
 #pragma once
 
-#include <concepts>
 #include <cstdint>
 #include <cstddef>
 #include <cassert>
-#include <span>
-#include <ranges>
+#include <type_traits>
 
 #define let const auto
 #define mut auto
@@ -41,8 +39,6 @@ using byte = u8;
 using std::size_t;
 using cstring = const char*;
 
-using std::integral;
-using std::span;
 using std::move;
 
 template<class T1, class T2>
@@ -50,7 +46,6 @@ concept same = std::is_same_v<T1, T2>;
 
 template<class T>
 concept non_void = (!same<T, void>);
-
 
 template<typename T>
 func max(T first) -> T
@@ -90,9 +85,10 @@ template<typename T>
 using No_Infer = std::type_identity<T>::type;
 #define no_infer(...) No_Infer<__VA_ARGS__> 
 
-template<integral T>
+template<typename T>
 func div_round_up(T value, no_infer(T) to_multiple_of) -> auto
 {
+    static_assert(std::is_integral_v<T>);
     return (value + to_multiple_of - 1) / to_multiple_of;
 }
 
@@ -200,57 +196,6 @@ namespace std
     func cend(const direct_container auto& arr) noexcept {return arr.data + arr.size;}
 
     func size(const direct_container auto& arr) noexcept {return arr.size;}
-}
-
-template <integral T>
-proc copy_n(T* to, const T* from, size_t count) -> void
-{
-    if (std::is_constant_evaluated())
-    {
-        for(size_t i = 0; i < count; i++)
-            to[i] = from[i];
-    }
-    else
-    {
-        assert(cast(size_t) abs(to - from) >= count && "adresses must not overlap");
-        memcpy(to, from, count * sizeof(T));
-    }
-}
-
-template <integral T>
-proc move_n(T* to, const T* from, size_t count) -> void
-{
-    if (std::is_constant_evaluated())
-        copy_n(to, from, count);
-    else
-        memmove(to, from, count * sizeof(T));
-}
-
-template <integral T>
-proc safe_copy_n(T* to, const T* from, size_t count) -> void
-{
-    if (std::is_constant_evaluated())
-        copy_n(to, from, count);
-    else
-    {
-        let diff = to - from;
-        if(cast(size_t) abs(diff) < count)
-            move_n(to, from, count);
-        else
-            copy_n(to, from, count);
-    }
-}
-
-template <integral T>
-proc null_n(T* to, size_t count) -> void
-{
-    if (std::is_constant_evaluated())
-    {
-        for(size_t i = 0; i < count; i++)
-            to[i] = 0;
-    }
-    else
-        memset(to, 0, count * sizeof(T));
 }
 
 

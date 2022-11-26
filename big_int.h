@@ -1,6 +1,11 @@
 #pragma once
 
+#include <concepts>
+#include <ranges>
 #include "big_int_ops.h"
+
+using std::integral;
+
 
 template <typename Grow>
 concept grower = requires(size_t to_fit, size_t capacity, size_t size, size_t static_capacity, size_t elem_size)
@@ -91,7 +96,7 @@ namespace detail
     proc dealloc_data(Big_Int_T* num) -> void;
 
     template<BIG_INT_TEMPL, typename T_>
-    proc to_owned(Big_Int_T* num, span<T_> const& other) -> void;
+    proc to_owned(Big_Int_T* num, Slice<T_> const& other) -> void;
 }
 
 
@@ -111,8 +116,8 @@ struct Big_Int_ : Alloc_, detail::Big_Int_Data<T_, static_capacity_>
     using Big_Int_Data     = detail::Big_Int_Data<T, static_capacity_>;
 
     using allocator_type   = Alloc;
-    using slice_type       = span<T>;
-    using const_slice_type = span<const T>;
+    using slice_type       = Slice<T>;
+    using const_slice_type = Slice<const T>;
     using grow_type        = Grow;
 
     constexpr static size_t static_capacity = cast(size_t) static_capacity_; 
@@ -126,21 +131,13 @@ struct Big_Int_ : Alloc_, detail::Big_Int_Data<T_, static_capacity_>
     constexpr Big_Int_(Max_Unsigned_Type val, Alloc alloc = Alloc()) 
         : Alloc{move(alloc)} 
     { 
-        constexpr size_t count = sizeof(Max_Unsigned_Type) / sizeof(T);
+        constexpr size_t count = digits_to_represent<T, Max_Unsigned_Type>();
 
         detail::alloc_data(this, count);
 
-        size_t i = 0;
-        for(; i < count; i++)
-        {
-            Max_Unsigned_Type curr_digit = val >> (i * sizeof(T) * CHAR_BIT);
-            if(curr_digit == 0)
-                break;
-
-            this->data[i] = cast(T) curr_digit;
-        }
-
-        this->size = i;
+        slice_type slice = {this->data, count};
+        let converted_slice = from_number<T>(&slice, val);
+        this->size = converted_slice.size;
     }
 
     explicit constexpr Big_Int_(slice_type slice, Alloc alloc = Alloc()) 
@@ -153,7 +150,7 @@ struct Big_Int_ : Alloc_, detail::Big_Int_Data<T_, static_capacity_>
         requires (has_static_storage)
     : Alloc{move(alloc)}, Big_Int_Data{data, size, capacity} 
     {
-        copy_n(static_data(this), static_data, static_capacity);
+        copy_n(static_data(this), static_data, static_capacity, Iter_Direction::FORWARD);
     }
 
     constexpr Big_Int_(T* data, size_t size, size_t capacity, Alloc alloc = Alloc()) noexcept
@@ -290,7 +287,7 @@ namespace detail
             alloc_data(to, other.size);
         }
 
-        copy_n(to->data, other.data, other.size);
+        copy_n(to->data, other.data, other.size, Iter_Direction::FORWARD);
         to->size = other.size;
     }
 
@@ -312,7 +309,7 @@ namespace detail
 
         constexpr let transfer_half_static = [](Big_Int* from, Big_Int* to)
         {
-            copy_n(static_data(to), static_data(from), to->static_capacity);
+            copy_n(static_data(to), static_data(from), to->static_capacity, Iter_Direction::FORWARD);
 
             from->data = to->data;
             to->data = static_data(to);
@@ -389,7 +386,7 @@ namespace detail
         }
 
         let copy_to = std::min(num->size, new_capacity);
-        copy_n(new_data, num->data, copy_to);
+        copy_n(new_data, num->data, copy_to, Iter_Direction::FORWARD);
 
         dealloc_data(num);
 
@@ -398,11 +395,11 @@ namespace detail
     }
 
     template<BIG_INT_TEMPL, typename T_>
-    proc to_owned(Big_Int_T* num, span<T_> const& other) -> void 
+    proc to_owned(Big_Int_T* num, Slice<T_> const& other) -> void 
     {
-        alloc_data(num, other.size());
-        copy_n(num->data, other.data(), other.size());
-        num->size = other.size();
+        alloc_data(num, other.size);
+        copy_n(num->data, other.data, other.size, Iter_Direction::FORWARD);
+        num->size = other.size;
     }
 }
 
