@@ -5,7 +5,8 @@
 #include <cctype>
 #include <random>
 #include <limits>
-
+#include <initializer_list>
+#include <algorithm>
 
 #include "benchmark.h"
 #include "big_int.h"
@@ -32,10 +33,55 @@ func make_big_int_with_size(size_t out_size) -> Big_Int_<T>
 template <typename T>
 constexpr size_t MAX_TYPE_SIZE_FRACTION = sizeof(Max_Unsigned_Type) / sizeof(T);
 
-runtime_func make_max_distribution() -> std::uniform_int_distribution<Max_Unsigned_Type>
+template <typename T>
+struct Uniform_Exponential_Distribution
 {
-    return std::uniform_int_distribution<Max_Unsigned_Type>(0, std::numeric_limits<Max_Unsigned_Type>::max());;
+    double shift;
+    double quotient;
+    std::uniform_real_distribution<> uniform_distribution;
+
+    Uniform_Exponential_Distribution(T from, T to, T quotient)
+    {
+        *this = Uniform_Exponential_Distribution(cast(double) from, cast(double) to, cast(double) quotient);
+    }
+
+    Uniform_Exponential_Distribution(double from, double to, double quotient)
+    {
+        assert(quotient != 1 && quotient > 0 && "quotient must be bigger than 0 and not 1");
+        assert(to >= from && "from .. to must be a valid range");
+        double shift = 1 - from; //in case from is 0 or negative
+
+
+        assert(to + shift >= 1);
+        double log_quot = log(quotient);
+        double from_log = log(from + shift) / log_quot;
+        double to_log = log(to + shift) / log_quot;
+
+        this->shift = shift;
+        this->quotient = quotient;
+        this->uniform_distribution = std::uniform_real_distribution<>{from_log, to_log};
+    }
+
+    template<class Generator>
+    T operator()(Generator& gen) const 
+    {
+        double val = pow(this->quotient, this->uniform_distribution(gen)) - this->shift;
+        if constexpr (std::is_floating_point_v<T>)
+            return cast(T) val;
+        else
+            return cast(T) round(val);
+    }
+
+};
+
+
+template <integral T, integral Of = Max_Unsigned_Type>
+runtime_func make_max_distribution(Of min = 0, Of max = std::numeric_limits<Of>::max()) -> Uniform_Exponential_Distribution<Of>
+{
+    double quot = pow(2, BIT_SIZE<T>);
+    return {cast(double) min, cast(double) max, quot};
 }
+
 
 template <typename T>
 struct Padded_Big_Int
@@ -90,6 +136,7 @@ proc test_misc()
     assert(integral_log2<Max>(513) == 9);
     assert(integral_log2<Max>(641) == 9);
     assert(integral_log2<Max>(1024) == 10);
+    assert(integral_log2<u64>(0xf4f1f63db9b7e800) == 63);
 
     assert(high_mask<u8>() == 0xF0);
     assert(high_mask<u8>(2) == 0b1111'1100);
@@ -255,7 +302,6 @@ proc test_shift_overflow()
     using Max = Max_Unsigned_Type;
     using Res = Batch_Op_Result;
     using Big = Big_Int_<T>;
-
 
     constexpr let shift_both = [](Max left_, Max right, Max carry_in, bool up_down, Iter_Direction direction) -> Batch_Op_Result{
         mut pad_left = make_padded_big_int<T>(left_, 1, 1);
@@ -471,7 +517,9 @@ runtime_proc test_untyped_add_carry(Random_Generator* generator, size_t random_r
     assert(auto_test_add(23446634457799, 454406999));
     assert(auto_test_add(74984193, 982387980));
 
-    let distribution = make_max_distribution();
+    std::uniform_real_distribution<> ditsr1;
+    mut ditsr2 = ditsr1;
+    let distribution = make_max_distribution<T>();
     for(size_t i = 0; i < random_runs; i++)
     {
         Max_Unsigned_Type left = distribution(*generator);
@@ -513,12 +561,32 @@ runtime_proc test_mul_quadratic(Random_Generator* generator, size_t random_runs)
 
     let auto_test_mul_quadratic = [=](Max left, Max right) -> bool
     {
-        Max res = left * right;
-        Max adjusted_left = res / right; //in case of overflow we will patch it so it doesnt overflow
-                                         // this will no doubt skew random distribution but I dont care much
+        //to protect from overflow we check if the result can overflow by computing the necessary ammount of bits to represent the number
+        // (by doing integral_log2) and then shifting it so that they will not overflow
 
-        Max adjusted_res = adjusted_left * right;
-        return test_mul_quadratic(adjusted_left, right, adjusted_res);
+        size_t adjusted_left = left;
+        size_t adjusted_right = right;
+
+        size_t log_left = integral_log2(left) + 1; 
+        size_t log_right = integral_log2(right) + 1; 
+        //integral_log2 returns position of highest set bit but we want "under which power of two is the whole number" 
+        // => we add 1
+
+        size_t combined_log = log_left + log_right;
+
+        //if can overflow we shift down so that its not possible
+        if(combined_log > BIT_SIZE<Max>)
+        {
+           size_t diff = combined_log - BIT_SIZE<Max>;
+           size_t shift = (diff + 1) / 2;
+
+           adjusted_left >>= shift;
+           adjusted_right >>= shift;
+        }
+
+        assert(integral_log2(adjusted_left) + integral_log2(adjusted_right) + 2 <= BIT_SIZE<Max>);
+        
+        return test_mul_quadratic(adjusted_left, adjusted_right, adjusted_left * adjusted_right);
     };
 
 
@@ -538,8 +606,7 @@ runtime_proc test_mul_quadratic(Random_Generator* generator, size_t random_runs)
     assert(test_mul_quadratic(0xABCDEF124, 0x1254, 0xC4CDA61BA7D0));
     assert(test_mul_quadratic(0x1254, 0xABCDEF124, 0xC4CDA61BA7D0));
 
-    constexpr let max = std::numeric_limits<Max>::max();
-    std::uniform_int_distribution<Max> distribution(0, max >> HALF_BIT_SIZE<Max>);
+    let distribution = make_max_distribution<T>();
     for(size_t i = 0; i < random_runs; i++)
     {
         Max left = distribution(*generator);
@@ -621,12 +688,132 @@ runtime_proc test_div_bit_by_bit(Random_Generator* generator, size_t random_runs
     assert(auto_test_div_bit_by_bit(959464934, 1111));
     assert(auto_test_div_bit_by_bit(27417318639, 57432413));
 
-    let distribution = make_max_distribution();
+    let distribution = make_max_distribution<T>();
     for(size_t i = 0; i < random_runs; i++)
     {
         Max_Unsigned_Type left = distribution(*generator);
         Max_Unsigned_Type right = distribution(*generator);
         assert(auto_test_div_bit_by_bit(left, right));
+    };
+}
+
+
+template <typename T>
+void println(Slice<T> slice)
+{
+    std::cout << "[";
+    if(slice.size > 0)
+    {
+        std::cout << cast(Max_Unsigned_Type) slice[0];
+
+        for(size_t i = 1; i < slice.size; i++)
+            std::cout << ", " << cast(Max_Unsigned_Type) slice[i];
+    }
+    std::cout << "]\n";
+}
+
+
+template <integral From, integral To>
+runtime_proc test_to_base(Random_Generator* generator, size_t random_runs)
+{
+    using Max = Max_Unsigned_Type;
+    func test_to_base = [](Big_Int_<From> in, To base, Slice<const To> expected) -> bool {
+        Big_Int_<From> temp = in;
+
+        Big_Int_<To> out = make_big_int_with_size<To>(required_size_to_base<From>(in.size, base));
+
+        Slice<From> in_s = in;
+        Slice<From> temp_s = temp;
+        Slice<To> out_s = out;
+
+        Slice<To> converted = (to_base<From, To>(in_s, &temp_s, &out_s, base));
+
+        assert(is_striped_form(expected));
+        assert(is_striped_form(converted));
+
+        return compare<To>(converted, expected) == 0;
+    };
+
+    func manual_test_to_base = [](Max num, To base, std::initializer_list<To> expected) -> bool 
+    {
+        Big_Int_<From> in = num;
+        Slice<const To> expected_s = {std::data(expected), std::size(expected)};
+        return test_to_base(std::move(in), base, expected_s);
+    };
+
+    func auto_to_base = [](Max num, To base) -> bool 
+    {
+        Big_Int_<From> in = num;
+        Big_Int_<To> expected = make_big_int_with_size<To>(required_size_to_base<From>(in.size, base));
+        size_t size = 0;
+        for(Max curr_val = num; curr_val != 0; curr_val /= base, size ++)
+        {
+            Max rem = curr_val % base;
+            expected[size] = cast(To) rem;
+        }
+
+        Slice<const To> expected_s = {std::data(expected), size};
+        assert(is_striped_form(expected_s));
+
+        return test_to_base(std::move(in), base, expected_s);
+    };
+
+    func test_from_base = [](Big_Int_<From> rep, To base, Slice<const To> expected) -> bool {
+        Big_Int_<To> out = make_big_int_with_size<To>(required_size_from_base<From>(rep.size, base));
+
+        Slice<From> rep_s = rep;
+        Slice<To> out_s = out;
+
+        Slice<To> converted = (from_base<From, To>(rep_s, &out_s, base));
+
+        assert(is_striped_form(expected));
+        assert(is_striped_form(converted));
+
+        return compare<To>(converted, expected) == 0;
+    }
+
+    func manual_test_from_base = [](std::initializer_list<To> from, To base, Max expected) -> bool 
+    {
+        Big_Int_<From> in = expected;
+        Slice<const To> expected_s = {std::data(expected), std::size(expected)};
+        return test_to_base(std::move(in), base, expected_s);
+    };
+
+
+    assert((manual_test_to_base(1, 2, {1})));
+    assert((manual_test_to_base(2, 2, {0,1})));
+    assert((manual_test_to_base(4, 2, {0,0,1})));
+    assert((manual_test_to_base(5, 2, {1,0,1})));
+    assert((manual_test_to_base(10, 2, {0,1,0,1})));
+
+    assert((manual_test_to_base(0, 9, {})));
+    assert((manual_test_to_base(1, 9, {1})));
+    assert((manual_test_to_base(2, 9, {2})));
+    assert((manual_test_to_base(65453, 9, {5,0,7,8,0,1})));
+    assert((manual_test_to_base(844354, 9, {1,1,2,6,2,5,1})));
+
+    assert((manual_test_from_base({1}, 1, 2)));
+    assert((manual_test_from_base({0,1}, 2, 2)));
+    assert((manual_test_from_base({0,0,1}, 2, 4)));
+    assert((manual_test_from_base({1,0,1}, 2, 5)));
+    assert((manual_test_from_base({0,1,0,1}, 2, 10)));
+
+    assert((manual_test_from_base({}, 9, 0)));
+    assert((manual_test_from_base({1}, 9, 1)));
+    assert((manual_test_from_base({2}, 9, 2)));
+    assert((manual_test_from_base({5,0,7,8,0,1}, 9, 65453)));
+    assert((manual_test_from_base({1,1,2,6,2,5,1}, 9, 844354)));
+
+    let num_dist = make_max_distribution<From>();
+    constexpr let max_1 = std::numeric_limits<To>::max() >> HALF_BIT_SIZE<To>;
+    constexpr let max_2 = std::numeric_limits<From>::max() >> HALF_BIT_SIZE<From>;
+
+    let base_dist = make_max_distribution<From, To>(2, min(max_1, max_2));
+    for(size_t i = 0; i < random_runs; i++)
+    {
+        Max_Unsigned_Type num = num_dist(*generator);
+        To base = base_dist(*generator);
+        assert(auto_to_base(num, base));
     };
 }
 
@@ -647,6 +834,10 @@ runtime_proc run_untyped_tests(Random_Generator* generator, size_t random_runs)
     test_untyped_add_carry<T>(generator, random_runs);
     test_mul_quadratic<T>(generator, random_runs);
     test_div_bit_by_bit<T>(generator, random_runs);
+    test_to_base<T, u8>(generator, random_runs);
+    test_to_base<T, u16>(generator, random_runs);
+    test_to_base<T, u32>(generator, random_runs);
+    test_to_base<T, u64>(generator, random_runs);
 }
 
 runtime_proc run_tests()
@@ -658,8 +849,8 @@ runtime_proc run_tests()
     const size_t random_runs = 10000;
 
     run_typed_tests();
-    //run_untyped_tests<u8>(&generator, random_runs);
-    //run_untyped_tests<u16>(&generator, random_runs);
+    run_untyped_tests<u8>(&generator, random_runs);
+    run_untyped_tests<u16>(&generator, random_runs);
     run_untyped_tests<u32>(&generator, random_runs);
     run_untyped_tests<u64>(&generator, random_runs);
 }

@@ -196,6 +196,7 @@ namespace std
     func cend(const direct_container auto& arr) noexcept {return arr.data + arr.size;}
 
     func size(const direct_container auto& arr) noexcept {return arr.size;}
+    func data(const direct_container auto& arr) noexcept {return arr.data;}
 }
 
 

@@ -163,7 +163,7 @@ struct Big_Int_ : Alloc_, detail::Big_Int_Data<T_, static_capacity_>
         requires std::is_copy_constructible_v<Alloc>
     : Alloc{cast(Alloc) other}
     {
-        detail::to_owned(this, cast(slice_type) other);
+        detail::to_owned(this, cast(const_slice_type) other);
     }
 
     constexpr ~Big_Int_() noexcept

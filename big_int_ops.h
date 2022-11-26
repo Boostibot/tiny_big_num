@@ -11,7 +11,7 @@ static constexpr bool DO_DEFAULT_MUL_HALF_BITS_OPTIMS = true;
 
 static constexpr bool DO_DEFAULT_DIV_SHIFT_OPTIMS = true;
 static constexpr bool DO_DEFAULT_DIV_CONST_OPTIMS = false;
-static constexpr bool DO_DEBUG_ALIAS_CHECKS = true; //prevents compile time execution when on
+static constexpr bool DO_RUNTIME_ONLY_CHECKS = true; //prevents compile time execution when on
 
 template <typename T>
 struct Trivial_Maybe
@@ -98,7 +98,7 @@ func are_one_way_aliasing(Slice<const T> before, Slice<const T> after) -> bool
 template <typename T>
 func check_are_aliasing(Slice<const T> left, Slice<const T> right) -> bool
 {
-    if constexpr(DO_DEBUG_ALIAS_CHECKS)
+    if constexpr(DO_RUNTIME_ONLY_CHECKS)
         return are_aliasing<T>(left, right);
     else
         return false;
@@ -107,7 +107,7 @@ func check_are_aliasing(Slice<const T> left, Slice<const T> right) -> bool
 template <typename T>
 func check_are_one_way_aliasing(Slice<const T> before, Slice<const T> after) -> bool
 { 
-    if constexpr(DO_DEBUG_ALIAS_CHECKS)
+    if constexpr(DO_RUNTIME_ONLY_CHECKS)
         return are_one_way_aliasing<T>(before, after);
     else
         return false;
@@ -198,34 +198,6 @@ func low_bits(T value, size_t index = HALF_BIT_SIZE<T>) -> T {
     return value & mask;
 };  
 
-//@TODO: Maybe remove
-//opposite operations are equivalent to first calculating the index remainder of index
-// and then using the desired operation ie.:
-//   opposite_high_mask<u8>(3) = high_mask<u8>(8 - 3)
-//The abbove approach however cannot be used for index of 0 since that would result in shift
-// equal to the number of bits which is undefined behaviour
-// (and actually causes bugs in shift_overflow ops)
-template <typename T>
-func opposite_high_mask(size_t index_from_top = HALF_BIT_SIZE<T>) -> T {
-    assert(index_from_top < BIT_SIZE<T>);
-    static_assert(std::is_unsigned_v<T>);
-
-    //opposite_low_mask(3)  == 0b00011111
-    //opposite_high_mask(3) == 0b11100000
-
-    return cast(T) ~(FULL_MASK<T> >> index_from_top);
-}
-
-template <typename T>
-func opposite_low_mask(size_t index_from_top = HALF_BIT_SIZE<T>) -> T {
-    assert(index_from_top < BIT_SIZE<T>);
-    static_assert(std::is_unsigned_v<T>);
-
-    //opposite_low_mask(3) == 0b00011111
-
-    return cast(T) (FULL_MASK<T> >> index_from_top);
-}
-
 template <typename T>
 func combine_bits(T low, T high, size_t index = HALF_BIT_SIZE<T>) -> T {
     assert(index < BIT_SIZE<T>);
@@ -287,6 +259,17 @@ struct Batch_Overflow
     bool constexpr operator ==(Batch_Overflow const&) const noexcept = default;
 };
 
+template <typename T>
+func last(Slice<T> slice) -> T
+{
+    return slice[slice.size - 1];
+}
+
+template <typename T>
+func last(Slice<T>* slice) -> T*
+{
+    return &(*slice)[slice->size - 1];
+}
 
 template <typename T>
 func zeros_from_index(Slice<T> num) -> size_t
@@ -310,7 +293,10 @@ func striped_trailing_zeros(Slice<T> num) -> Slice<T>
 template <typename T>
 func is_striped_form(Slice<T> num) -> bool
 {
-    return zeros_from_index(num) == num.size;
+    if(num.size == 0)
+        return true;
+
+    return last(num) != 0;
 }
 
 template <typename Digit, typename Number>
@@ -1079,17 +1065,6 @@ struct Div_Res
     Slice<T> remainder;
 };
 
-template <typename T>
-func last(Slice<T> slice) -> T
-{
-    return slice[slice.size - 1];
-}
-
-template <typename T>
-func last(Slice<T>* slice) -> T*
-{
-    return &(*slice)[slice->size - 1];
-}
 
 template <typename T, 
     bool DO_SHIFT = DO_DEFAULT_DIV_SHIFT_OPTIMS, 
@@ -1355,13 +1330,15 @@ proc mul_quadratic_fused(Slice<T>* to, Slice<const T> left, Slice<const T> right
 template <typename T>
 proc reverse(Slice<T>* arr) -> void
 {
-    size_t half_size = arr.size / 2;
+    Slice<T> ref = *arr;
+    size_t half_size = ref.size / 2;
     for(size_t i = 0; i < half_size; i++)
-        arr[i] = arr[arr.size - i - 1];
+        std::swap(ref[i], ref[ref.size - i - 1]);
 }
 
+//@TODO: remove -- too general 
 template <typename From, typename To>
-proc to_base(Slice<const From> num, Slice<From>* div_temp1, Slice<From>* div_temp2, Slice<From>* rem_temp, Slice<To>* to, size_t base) -> Slice<To>
+proc to_big_base(Slice<const From> num, Slice<From>* div_temp1, Slice<From>* div_temp2, Slice<From>* rem_temp, Slice<To>* to, size_t base) -> Slice<To>
 {
     static_assert(std::is_unsigned_v<From>);
     static_assert(std::is_unsigned_v<To>);
@@ -1369,9 +1346,9 @@ proc to_base(Slice<const From> num, Slice<From>* div_temp1, Slice<From>* div_tem
     {
         return check_are_aliasing(a, b) 
             || check_are_aliasing(a, c) 
-            || check_are_aliasing(a, d)
-            || check_are_aliasing(b, c)
-            || check_are_aliasing(b, d)
+            || check_are_aliasing(a, d) 
+            || check_are_aliasing(b, c) 
+            || check_are_aliasing(b, d) 
             || check_are_aliasing(c, d);
     };
     
@@ -1410,43 +1387,111 @@ proc to_base(Slice<const From> num, Slice<From>* div_temp1, Slice<From>* div_tem
     }
 
     Slice<To> converted = trim(*to, to_size);
-    reverse(&converted);
+    //reverse(&converted);
     return converted;
 }
 
-//@TODO: rewrite all into returning spans
+runtime_func size_to_fit_base(double from_base, double from_size, double to_base) -> double
+{
+    //const double max_from = pow(from_base, from_size);
+    //const double to_size = log(max_from) / log(to_base);
+
+    const double to_size = from_size * log(from_base) / log(to_base);
+    return to_size;
+}
+
+//what is the size of the output buffer when converting from number to its in base rep?
+template <integral From>
+runtime_func required_size_to_base(size_t from_size, size_t to_base) -> size_t
+{
+    constexpr double in_one_digit = round(pow(2, BIT_SIZE<From>));
+    return ceil(size_to_fit_base(in_one_digit, cast(double) from_size, cast(double) to_base));
+}
+
+//what is the size of the output buffer when converting from base rep to number?
+template <integral From>
+runtime_func required_size_from_base(size_t from_size, size_t from_base) -> size_t
+{
+    constexpr double in_one_digit = round(pow(2, BIT_SIZE<From>));
+    return ceil(size_to_fit_base(cast(double) from_base, cast(double) from_size, in_one_digit));
+}
+
+//@TODO: Flip args so that to is first
 template <typename From, typename To>
-proc to_base_low(Slice<const From> num, Slice<From>* temp, Slice<To>* to, To base) -> Slice<To>
+proc to_base(Slice<const From> num, Slice<From>* temp, Slice<To>* rep, To base) -> Slice<To>
 {
     static_assert(std::is_unsigned_v<From>);
-    static_assert(std::is_unsigned_v<To>);
+    if constexpr(std::is_same_v<From, To>)
+        assert(check_are_aliasing<T>(*num, rep) == false);
+
     const From cast_base = cast(From) base;
 
-    assert(is_striped_form(num)); //@TODO: maybe relax?
+    assert(is_striped_form(num));
     assert(temp->size >= num.size && "temp must be big enough");
     assert(base >= 2 && "base must be bigger than two");
     assert(cast(To) cast_base == base && "base must fit in type");
     assert(high_bits(cast_base) == 0 && "base must be low bits only of From type (so that short div algorhimt can be used)");
 
+    if constexpr (DO_RUNTIME_ONLY_CHECKS)
+    {
+        size_t at_least = required_size_to_base<From>(num.size, base);
+        assert(at_least <= rep->size && "there must be enough size rep represent the number even in the worst case scenario");
+    }
+
     size_t to_size = 0;
     if(num.size == 0)
-        return;
+        return trim(*rep, to_size);
 
-    Slice<From> reduced_temp = *temp;
-
-    while(reduced_temp.size != 0)
+    Slice<From> val_left = *temp;
+    while(true)
     {
         const Slice<const From> curr_div_from = to_size == 0 
-            ? num : reduced_temp; 
+            ? num : val_left;
+            
+        if(curr_div_from.size == 0)
+            break;
 
-        let res = div_overflow_low_batch<From>(&reduced_temp, curr_div_from, cast_base);
-        reduced_temp = striped_trailing_zeros(reduced_temp);
+        let res = div_overflow_low_batch<From>(&val_left, curr_div_from, cast_base);
+        val_left = striped_trailing_zeros(val_left);
         const To digit = cast(To) res.overflow;
-        (*to)[to_size] = digit;
+        (*rep)[to_size] = digit;
         to_size++;
     }
 
-    Slice<To> converted = trim(*to, to_size);
-    reverse(&converted);
+    Slice<To> converted = trim(*rep, to_size);
+    assert(is_striped_form(converted));
     return converted;
+}
+
+template <typename From, typename To>
+proc from_base(Slice<const From> rep, Slice<To>* num, To base) -> Slice<To>
+{
+    static_assert(std::is_unsigned_v<To>);
+    assert(is_striped_form(rep));
+    if constexpr(std::is_same_v<From, To>)
+        assert(check_are_aliasing<T>(*rep, num) == false);
+
+    if constexpr (DO_RUNTIME_ONLY_CHECKS)
+    {
+        size_t at_least = required_size_from_base<From>(rep.size, base);
+        assert(at_least <= num->size && "there must be enough size num represent the number even in the worst case scenario");
+    }
+
+    constexpr size_t single_num_digits = digits_to_represent<To, From>();
+    To single_num_vals[single_num_digits];
+    Slice<To> single_num = {single_num_vals, single_num_digits};
+    
+    null_n(num->data, num->size);
+
+    for(size_t i = 0; i < rep.size; i++)
+    {
+        let converted = from_number<To, From>(&single_num, rep[i]);
+        let add_res = add_overflow_batch(num, *num, converted);
+        let mul_res = mul_overflow_batch(num, *num, base);
+
+        assert(add_res.overflow == 0);
+        assert(mul_res.overflow == 0);
+    }
+
+    return striped_trailing_zeros(*num);
 }
