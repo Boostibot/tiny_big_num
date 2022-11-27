@@ -51,7 +51,6 @@ struct Uniform_Exponential_Distribution
         assert(to >= from && "from .. to must be a valid range");
         double shift = 1 - from; //in case from is 0 or negative
 
-
         assert(to + shift >= 1);
         double log_quot = log(quotient);
         double from_log = log(from + shift) / log_quot;
@@ -121,22 +120,30 @@ func make_padded_big_int(Max_Unsigned_Type val, size_t before_digits = 1, size_t
 
 proc test_misc()
 {
-    using T = u32;
-    using Res_S = Overflow<T>;
     using Max = Max_Unsigned_Type;
 
-    assert(integral_log2<Max>(0) == 0);
-    assert(integral_log2<Max>(1) == 0);
-    assert(integral_log2<Max>(2) == 1);
-    assert(integral_log2<Max>(3) == 1);
-    assert(integral_log2<Max>(4) == 2);
-    assert(integral_log2<Max>(7) == 2);
-    assert(integral_log2<Max>(8) == 3);
-    assert(integral_log2<Max>(76) == 6);
-    assert(integral_log2<Max>(513) == 9);
-    assert(integral_log2<Max>(641) == 9);
-    assert(integral_log2<Max>(1024) == 10);
-    assert(integral_log2<u64>(0xf4f1f63db9b7e800) == 63);
+    assert(find_last_set_bit<Max>(0) == 0);
+    assert(find_last_set_bit<Max>(1) == 0);
+    assert(find_last_set_bit<Max>(2) == 1);
+    assert(find_last_set_bit<Max>(3) == 1);
+    assert(find_last_set_bit<Max>(4) == 2);
+    assert(find_last_set_bit<Max>(7) == 2);
+    assert(find_last_set_bit<Max>(8) == 3);
+    assert(find_last_set_bit<Max>(76) == 6);
+    assert(find_last_set_bit<Max>(513) == 9);
+    assert(find_last_set_bit<Max>(641) == 9);
+    assert(find_last_set_bit<Max>(1024) == 10);
+    assert(find_last_set_bit<u64>(0xf4f1f63db9b7e800) == 63);
+    assert(find_last_set_bit<Max>(0b010100) == 4);
+    assert(find_last_set_bit<Max>(0b010000) == 4);
+
+    assert(find_first_set_bit<Max>(0) == 0);
+    assert(find_first_set_bit<Max>(0b000001) == 0);
+    assert(find_first_set_bit<Max>(0b010100) == 2);
+    assert(find_first_set_bit<Max>(0b010101) == 0);
+    assert(find_first_set_bit<Max>(0b010000) == 4);
+    assert(find_first_set_bit<Max>(0b010100) == 2);
+    assert(find_first_set_bit<Max>(0b010010) == 1);
 
     assert(high_mask<u8>() == 0xF0);
     assert(high_mask<u8>(2) == 0b1111'1100);
@@ -361,7 +368,8 @@ proc test_shift_overflow()
 
     assert((shift_up_overflow_batch(0, 0, 0) == Res{0, 0}));
     assert((shift_up_overflow_batch(0, 1, 0) == Res{0, 0}));
-    assert((shift_up_overflow_batch(0, 1, 0xFF) == Res{0, 0x1})); //this is sort of a weird edge case I dont know how to best handle
+    assert((shift_up_overflow_batch(0, 1, 0xFF) == Res{0, 0xFF})); //should be consistent with multiply
+
     assert((shift_up_overflow_batch(1, 1) == Res{2, 0}));
     assert((shift_up_overflow_batch(1, 4) == Res{16, 0}));
     assert((shift_up_overflow_batch(1, 4, 0b1010'0000) == Res{0b11010, 0}));
@@ -375,7 +383,7 @@ proc test_shift_overflow()
 
     assert((shift_down_overflow_batch(0, 0, 0) == Res{0, 0}));
     assert((shift_down_overflow_batch(0, 1, 0) == Res{0, 0}));
-    assert((shift_down_overflow_batch(0, 1, 0xFF) == Res{0, 0x80})); //edge case
+    assert((shift_down_overflow_batch(0, 1, 0xFF) == Res{0, 0xFF}));
     assert((shift_down_overflow_batch(1, 1) == Res{0, 0x80}));
     assert((shift_down_overflow_batch(0b10, 1) == Res{0b1, 0}));
     assert((shift_down_overflow_batch(0b110000, 3) == Res{0b110, 0}));
@@ -423,6 +431,7 @@ proc test_mul_overflow()
     assert((mul_overflow_batch(1, 0) == Res{0, 0}));
     assert((mul_overflow_batch(0, 1) == Res{0, 0}));
     assert((mul_overflow_batch(1, 1) == Res{1, 0}));
+    assert((mul_overflow_batch(0, 1, 0xFF) == Res{0, 0xFF}));
     assert((mul_overflow_batch(25, 1) == Res{25, 0}));
     assert((mul_overflow_batch(25, 5) == Res{125, 0}));
     assert((mul_overflow_batch(0xFF, 0x10) == Res{0xF0, 0xF}));
@@ -467,9 +476,6 @@ proc test_div_overflow_low()
         return Batch_Op_Result{num1, res1.overflow};
     };
 
-    //@TODO:
-    //assert((div_overflow_low_batch(0, 0) == Res{0, 0})); //do not test div by 0 yet
-    //assert((div_overflow_low_batch(1, 0) == Res{0, 0}));
     assert((div_overflow_low_batch(0, 1) == Res{0, 0}));
     assert((div_overflow_low_batch(1, 1) == Res{1, 0}));
     assert((div_overflow_low_batch(25, 1) == Res{25, 0}));
@@ -562,14 +568,14 @@ runtime_proc test_mul_quadratic(Random_Generator* generator, size_t random_runs)
     let auto_test_mul_quadratic = [=](Max left, Max right) -> bool
     {
         //to protect from overflow we check if the result can overflow by computing the necessary ammount of bits to represent the number
-        // (by doing integral_log2) and then shifting it so that they will not overflow
+        // (by doing find_last_set_bit) and then shifting it so that they will not overflow
 
         size_t adjusted_left = left;
         size_t adjusted_right = right;
 
-        size_t log_left = integral_log2(left) + 1; 
-        size_t log_right = integral_log2(right) + 1; 
-        //integral_log2 returns position of highest set bit but we want "under which power of two is the whole number" 
+        size_t log_left = find_last_set_bit(left) + 1; 
+        size_t log_right = find_last_set_bit(right) + 1; 
+        //find_last_set_bit returns position of highest set bit but we want "under which power of two is the whole number" 
         // => we add 1
 
         size_t combined_log = log_left + log_right;
@@ -584,7 +590,7 @@ runtime_proc test_mul_quadratic(Random_Generator* generator, size_t random_runs)
            adjusted_right >>= shift;
         }
 
-        assert(integral_log2(adjusted_left) + integral_log2(adjusted_right) + 2 <= BIT_SIZE<Max>);
+        assert(find_last_set_bit(adjusted_left) + find_last_set_bit(adjusted_right) + 2 <= BIT_SIZE<Max>);
         
         return test_mul_quadratic(adjusted_left, adjusted_right, adjusted_left * adjusted_right);
     };
@@ -603,6 +609,10 @@ runtime_proc test_mul_quadratic(Random_Generator* generator, size_t random_runs)
     assert(test_mul_quadratic(13745, 137, 0x1CBBB9));
     assert(test_mul_quadratic(0xFFFF, 0x10000, 0xFFFF0000));
     assert(test_mul_quadratic(0xABCD, 0x10001, 0xABCDABCD));
+    assert(test_mul_quadratic(0xAB, 0x1254, 0xAB*0x1254));
+    assert(test_mul_quadratic(0x1000, 0x1200, 0x1000*0x1200));
+    assert(test_mul_quadratic(0xABCD, 0x54, 0xABCD*0x54));
+    assert(test_mul_quadratic(0xABCD, 0x1254, 0xABCD*0x1254));
     assert(test_mul_quadratic(0xABCDEF124, 0x1254, 0xC4CDA61BA7D0));
     assert(test_mul_quadratic(0x1254, 0xABCDEF124, 0xC4CDA61BA7D0));
 
@@ -717,98 +727,98 @@ template <integral From, integral To>
 runtime_proc test_to_base(Random_Generator* generator, size_t random_runs)
 {
     using Max = Max_Unsigned_Type;
-    func test_to_base = [](Big_Int_<From> in, To base, Slice<const To> expected) -> bool {
-        Big_Int_<From> temp = in;
+    func test_to_base = [](Slice<const From> num, To base, Slice<const To> expected_rep) -> bool {
+        Big_Int_<From> temp = Big_Int_<From>(num);
+        Big_Int_<To> out = make_big_int_with_size<To>(required_size_to_base<From>(num.size, base));
 
-        Big_Int_<To> out = make_big_int_with_size<To>(required_size_to_base<From>(in.size, base));
-
-        Slice<From> in_s = in;
         Slice<From> temp_s = temp;
         Slice<To> out_s = out;
 
-        Slice<To> converted = (to_base<From, To>(in_s, &temp_s, &out_s, base));
+        Slice<To> converted = (to_base<From, To>(&out_s,&temp_s, num, base));
 
-        assert(is_striped_form(expected));
-        assert(is_striped_form(converted));
+        assert(is_reverse_striped_form(expected_rep));
+        assert(is_reverse_striped_form(converted));
 
-        return compare<To>(converted, expected) == 0;
+        return is_equal<To>(converted, expected_rep);
     };
 
-    func manual_test_to_base = [](Max num, To base, std::initializer_list<To> expected) -> bool 
+    func manual_test_to_base = [](Max num, To base, std::initializer_list<To> expected_rep) -> bool 
     {
-        Big_Int_<From> in = num;
-        Slice<const To> expected_s = {std::data(expected), std::size(expected)};
-        return test_to_base(std::move(in), base, expected_s);
+        Big_Int_<From> num_ = Big_Int_<From>(num);
+        Slice<const To> expected_rep_s = {std::data(expected_rep), std::size(expected_rep)};
+        return test_to_base(num_, base, expected_rep_s);
     };
 
     func auto_to_base = [](Max num, To base) -> bool 
     {
-        Big_Int_<From> in = num;
-        Big_Int_<To> expected = make_big_int_with_size<To>(required_size_to_base<From>(in.size, base));
+        Big_Int_<From> num_ = num;
+        Big_Int_<To> expected_rep = make_big_int_with_size<To>(required_size_to_base<From>(num_.size, base));
         size_t size = 0;
         for(Max curr_val = num; curr_val != 0; curr_val /= base, size ++)
         {
             Max rem = curr_val % base;
-            expected[size] = cast(To) rem;
+            expected_rep[size] = cast(To) rem;
         }
 
-        Slice<const To> expected_s = {std::data(expected), size};
-        assert(is_striped_form(expected_s));
-
-        return test_to_base(std::move(in), base, expected_s);
+        Slice<To> expected_rep_s = {std::data(expected_rep), size};
+        reverse(&expected_rep_s);
+        return test_to_base(num_, base, expected_rep_s);
     };
 
-    func test_from_base = [](Big_Int_<From> rep, To base, Slice<const To> expected) -> bool {
+    func test_from_base = [](Slice<const From> rep, To base, Slice<const To> expected_num) -> bool {
         Big_Int_<To> out = make_big_int_with_size<To>(required_size_from_base<From>(rep.size, base));
 
-        Slice<From> rep_s = rep;
         Slice<To> out_s = out;
 
-        Slice<To> converted = (from_base<From, To>(rep_s, &out_s, base));
+        Slice<To> converted = (from_base<From, To>(&out_s, rep, base));
 
-        assert(is_striped_form(expected));
-        assert(is_striped_form(converted));
+        assert(is_reverse_striped_form(expected_num));
+        assert(is_reverse_striped_form(converted));
 
-        return compare<To>(converted, expected) == 0;
-    }
+        //println(expected_num);
+        //println(converted);
 
-    func manual_test_from_base = [](std::initializer_list<To> from, To base, Max expected) -> bool 
-    {
-        Big_Int_<From> in = expected;
-        Slice<const To> expected_s = {std::data(expected), std::size(expected)};
-        return test_to_base(std::move(in), base, expected_s);
+        return is_equal<To>(converted, expected_num);
     };
 
+    func manual_test_from_base = [](std::initializer_list<From> rep, To base, Max expected_num) -> bool 
+    {
+        Big_Int_<To> expected_num_ = expected_num;
+        Slice<const From> rep_s = {std::data(rep), std::size(rep)};
+        return test_from_base(rep_s, base, expected_num_);
+    };
 
     assert((manual_test_to_base(1, 2, {1})));
-    assert((manual_test_to_base(2, 2, {0,1})));
-    assert((manual_test_to_base(4, 2, {0,0,1})));
+    assert((manual_test_to_base(2, 2, {1,0})));
+    assert((manual_test_to_base(4, 2, {1,0,0})));
     assert((manual_test_to_base(5, 2, {1,0,1})));
-    assert((manual_test_to_base(10, 2, {0,1,0,1})));
+    assert((manual_test_to_base(10, 2, {1,0,1,0})));
 
     assert((manual_test_to_base(0, 9, {})));
     assert((manual_test_to_base(1, 9, {1})));
     assert((manual_test_to_base(2, 9, {2})));
-    assert((manual_test_to_base(65453, 9, {5,0,7,8,0,1})));
-    assert((manual_test_to_base(844354, 9, {1,1,2,6,2,5,1})));
+    assert((manual_test_to_base(65453, 9, {1,0,8,7,0,5})));
+    assert((manual_test_to_base(844354, 9, {1,5,2,6,2,1,1})));
+    assert((manual_test_to_base(844354, 10, {8,4,4,3,5,4})));
 
-    assert((manual_test_from_base({1}, 1, 2)));
-    assert((manual_test_from_base({0,1}, 2, 2)));
-    assert((manual_test_from_base({0,0,1}, 2, 4)));
+    assert((manual_test_from_base({1}, 2, 1)));
+    assert((manual_test_from_base({1,0}, 2, 2)));
+    assert((manual_test_from_base({1,0,0}, 2, 4)));
     assert((manual_test_from_base({1,0,1}, 2, 5)));
-    assert((manual_test_from_base({0,1,0,1}, 2, 10)));
+    assert((manual_test_from_base({1,0,1,0}, 2, 10)));
 
     assert((manual_test_from_base({}, 9, 0)));
     assert((manual_test_from_base({1}, 9, 1)));
     assert((manual_test_from_base({2}, 9, 2)));
-    assert((manual_test_from_base({5,0,7,8,0,1}, 9, 65453)));
-    assert((manual_test_from_base({1,1,2,6,2,5,1}, 9, 844354)));
+    assert((manual_test_from_base({1,0,8,7,0,5}, 9, 65453)));
+    assert((manual_test_from_base({1,5,2,6,2,1,1}, 9, 844354)));
+    assert((manual_test_from_base({8,4,4,3,5,4}, 10, 844354)));
 
     let num_dist = make_max_distribution<From>();
-    constexpr let max_1 = std::numeric_limits<To>::max() >> HALF_BIT_SIZE<To>;
-    constexpr let max_2 = std::numeric_limits<From>::max() >> HALF_BIT_SIZE<From>;
+    constexpr size_t max_1 = std::numeric_limits<To>::max() >> HALF_BIT_SIZE<To>;
+    constexpr size_t max_2 = std::numeric_limits<From>::max() >> HALF_BIT_SIZE<From>;
 
-    let base_dist = make_max_distribution<From, To>(2, min(max_1, max_2));
+    let base_dist = make_max_distribution<From, To>(2, cast(To) min(max_1, max_2));
     for(size_t i = 0; i < random_runs; i++)
     {
         Max_Unsigned_Type num = num_dist(*generator);
@@ -834,10 +844,12 @@ runtime_proc run_untyped_tests(Random_Generator* generator, size_t random_runs)
     test_untyped_add_carry<T>(generator, random_runs);
     test_mul_quadratic<T>(generator, random_runs);
     test_div_bit_by_bit<T>(generator, random_runs);
-    test_to_base<T, u8>(generator, random_runs);
-    test_to_base<T, u16>(generator, random_runs);
-    test_to_base<T, u32>(generator, random_runs);
-    test_to_base<T, u64>(generator, random_runs);
+
+    const size_t quarter_runs = random_runs / 4;
+    test_to_base<T, u8>(generator, quarter_runs);
+    test_to_base<T, u16>(generator, quarter_runs);
+    test_to_base<T, u32>(generator, quarter_runs);
+    test_to_base<T, u64>(generator, quarter_runs);
 }
 
 runtime_proc run_tests()

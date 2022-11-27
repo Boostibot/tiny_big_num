@@ -1,16 +1,17 @@
 #pragma once
 
-#include <optional>
+#include <bit>
 #include "preface.h"
 
 using Max_Unsigned_Type = u64;
 
-static constexpr bool DO_DEFAULT_MUL_SHIFT_OPTIMS = true;
+static constexpr bool DO_DEFAULT_MUL_SHIFT_OPTIMS = false;
 static constexpr bool DO_DEFAULT_MUL_CONST_OPTIMS = false;
-static constexpr bool DO_DEFAULT_MUL_HALF_BITS_OPTIMS = true;
+static constexpr bool DO_DEFAULT_MUL_HALF_BITS_OPTIMS = false;
 
-static constexpr bool DO_DEFAULT_DIV_SHIFT_OPTIMS = true;
+static constexpr bool DO_DEFAULT_DIV_SHIFT_OPTIMS = false;
 static constexpr bool DO_DEFAULT_DIV_CONST_OPTIMS = false;
+static constexpr bool DO_DEFAULT_DIV_FUSED_SHIFT_OPTIMS = true;
 static constexpr bool DO_RUNTIME_ONLY_CHECKS = true; //prevents compile time execution when on
 
 template <typename T>
@@ -214,11 +215,12 @@ func dirty_combine_bits(T low, T high, size_t index = HALF_BIT_SIZE<T>) -> T {
 };
 
 template <typename T>
-func integral_log2(T val) -> T  
+func find_last_set_bit(T val) -> T  
 {
     static_assert(std::is_unsigned_v<T>);
     if constexpr(sizeof(T) > 8)
     {
+        //@TODO: upgrade to iterative on u64s and test
         T k = 0;
 
         while (val >>= 1) 
@@ -240,6 +242,53 @@ func integral_log2(T val) -> T
         return k;
     }
 }
+
+template <typename T>
+func find_first_set_bit(T val) -> T  
+{
+    if(val == 0)
+        return 0;
+
+    static_assert(std::is_unsigned_v<T>);
+    if constexpr(sizeof(T) > 8)
+    {
+        T k = 0;
+
+        while ((val & 1) == 0)
+        {
+            k++;
+            val >>= 1;
+        }
+        return k;
+    }
+    else
+    {
+        //10110000
+        //&   1111 -> nothing => +4 and shift
+        //00001011
+        //&     11 -> something => +0
+        //00001011
+        //&      1 -> somehing => +0
+        // => answer: 4 + 0 + 0 = 4 
+
+        assert(sizeof(T) <= 8 && "Higher integer sizes not supported");
+        T  k = 0;
+
+        if constexpr(sizeof(T) > 4)
+            if ((val & 0xFFFFFFFFu) == 0) { val >>= 32; k |= 32; }
+        if constexpr(sizeof(T) > 2)
+            if ((val & 0x0000FFFFu) == 0) { val >>= 16; k |= 16; }
+        if constexpr(sizeof(T) > 1)
+            if ((val & 0x000000FFu) == 0) { val >>= 8;  k |= 8;  }
+
+        if ((val & 0x0000000Fu) == 0) { val >>= 4;  k |= 4;  }
+        if ((val & 0x00000003u) == 0) { val >>= 2;  k |= 2;  }
+
+        k |= (~val & 0b1);
+        return k;
+    }
+}
+
 
 template <typename T>
 struct Overflow
@@ -272,22 +321,35 @@ func last(Slice<T>* slice) -> T*
 }
 
 template <typename T>
-func zeros_from_index(Slice<T> num) -> size_t
+func find_last_set_digit(Slice<T> num) -> size_t
 {
     static_assert(std::is_unsigned_v<T>);
 
-    size_t to = num.size;
-    for(; to-- > 0;)
-        if(num[to] != 0)
+    size_t i = num.size;
+    for(; i-- > 0;)
+        if(num[i] != 0)
             break;
 
-    return to + 1;
+    return i;
+}
+
+template <typename T>
+func find_first_set_digit(Slice<T> num) -> size_t
+{
+    static_assert(std::is_unsigned_v<T>);
+    
+    size_t i = 0;
+    for(; i < num.size; i++)
+        if(num[i] != 0)
+            break;
+
+    return i;
 }
 
 template <typename T>
 func striped_trailing_zeros(Slice<T> num) -> Slice<T>
 {
-    return trim(num, zeros_from_index(num));
+    return trim(num, find_last_set_digit(num) + 1);
 }
 
 template <typename T>
@@ -297,6 +359,15 @@ func is_striped_form(Slice<T> num) -> bool
         return true;
 
     return last(num) != 0;
+}
+
+template <typename T>
+func is_reverse_striped_form(Slice<T> num) -> bool
+{
+    if(num.size == 0)
+        return true;
+
+    return num[0] != 0;
 }
 
 template <typename Digit, typename Number>
@@ -453,21 +524,69 @@ func sub_overflow(T left, T right, T carry = 0) -> Overflow<T>
     return Overflow<T>{combine_bits(res_low, res_high), new_carry};
 }
 
-template <typename T>
-func add_carry_patch_step(T left, T carry) -> Overflow<T>
+template <typename T, bool IN_PLACE = false>
+func add_overflow_batch_patch(Slice<T>* to, Slice<const T> left, T carry, size_t from) -> Batch_Overflow<T>
 {
-    T res = left + carry;
-    return Overflow<T>{res, cast(T)(res < left)};
+    assert(to->size >= left.size);
+    assert(check_are_one_way_aliasing<T>(left, *to) == false);
+
+    const Slice<T> trimmed_to = trim(*to, left.size);
+    size_t j = from;
+    if(carry != 0)
+    {
+        for (; j < left.size != 0; j++)
+        {
+            const T digit = left[j];
+            const T patch_res = digit + carry;
+            trimmed_to[j] = patch_res;
+
+            if(patch_res > digit)
+            {
+                carry = 0;
+                j++;
+                break;
+            }
+        }
+    }
+
+    if constexpr (IN_PLACE == false)
+        copy_n<T>(to->data + j, left.data + j, left.size - j, Iter_Direction::FORWARD);
+
+    return Batch_Overflow<T>{trimmed_to, carry};
 }
 
-template <typename T>
-func sub_carry_patch_step(T left, T carry) -> Overflow<T>
+template <typename T, bool IN_PLACE = false>
+func sub_overflow_batch_patch(Slice<T>* to, Slice<const T> left, T carry, size_t from) -> Batch_Overflow<T>
 {
-    T res = left - carry;
-    return Overflow<T>{res, cast(T)(res > left)};
+    assert(to->size >= left.size);
+    assert(check_are_one_way_aliasing<T>(left, *to) == false);
+
+    const Slice<T> trimmed_to = trim(*to, left.size);
+    size_t j = from;
+    if(carry != 0)
+    {
+        for (; j < left.size != 0; j++)
+        {
+            const T digit = left[j];
+            const T patch_res = digit - carry;
+            trimmed_to[j] = patch_res;
+
+            if(patch_res < digit)
+            {
+                carry = 0;
+                j++;
+                break;
+            }
+        }
+    }
+
+    if constexpr (IN_PLACE == false)
+        copy_n<T>(to->data + j, left.data + j, left.size - j, Iter_Direction::FORWARD);
+
+    return Batch_Overflow<T>{trimmed_to, carry};
 }
 
-template <typename T>
+template <typename T, bool IN_PLACE = false>
 func add_overflow_batch(Slice<T>* to, Slice<const T> left, Slice<const T> right, T carry_in = 0) -> Batch_Overflow<T>
 {
     static_assert(std::is_unsigned_v<T>);
@@ -480,24 +599,17 @@ func add_overflow_batch(Slice<T>* to, Slice<const T> left, Slice<const T> right,
         std::swap(left, right);
 
     T carry = carry_in;
-    proc update = [&](size_t i, Overflow<T> oveflow) {
-        (*to)[i] = oveflow.value;
-        carry = oveflow.overflow;
-    };
+    for (size_t i = 0; i < right.size; i++)
+    {
+        let res = add_overflow<T>(left[i], right[i], carry);
+        (*to)[i] = res.value;
+        carry = res.overflow;
+    }
 
-    const size_t min_size = min(left.size, right.size);
-    const size_t max_size = max(left.size, right.size);
-    for (size_t i = 0; i < min_size; i++)
-        update(i, add_overflow<T>(left[i], right[i], carry));
-
-    //@TODO: add early stop optim
-    for (size_t i = right.size; i < left.size; i++)
-        update(i, add_carry_patch_step<T>(left[i], carry));
-
-    return Batch_Overflow<T>{trim(*to, max_size), carry};
+    return add_overflow_batch_patch<T, IN_PLACE>(to, left, carry, right.size);
 }
 
-template <typename T>
+template <typename T, bool IN_PLACE = false>
 func sub_overflow_batch(Slice<T>* to, Slice<const T> left, Slice<const T> right, T carry_in = 0) -> Batch_Overflow<T>
 {
     static_assert(std::is_unsigned_v<T>);
@@ -520,8 +632,11 @@ func sub_overflow_batch(Slice<T>* to, Slice<const T> left, Slice<const T> right,
     for (size_t i = left.size; i < right.size; i++)
         update(i, sub_overflow<T>(0, right[i], carry));
 
-    for (size_t i = right.size; i < left.size; i++)
-        update(i, sub_carry_patch_step<T>(left[i], carry));
+    if(right.size < left.size)
+        return sub_overflow_batch_patch<T, IN_PLACE>(to, left, carry, right.size);
+
+    //for (size_t i = right.size; i < left.size; i++)
+        //update(i, sub_carry_patch_step<T>(left[i], carry));
 
     return Batch_Overflow<T>{trim(*to, max_size), carry};
 }
@@ -644,14 +759,11 @@ proc shift_up_overflow_batch(Slice<T>* out, Slice<const T> in, size_t by_bits,
     if(by_bits == 0)
     {
         copy_n<T>(out->data, in.data, in.size, direction);
-        return Batch_Overflow<T>{out_trimmed, 0};
+        return Batch_Overflow<T>{out_trimmed, carry_in};
     }
 
     if(in.size == 0)
-    {
-        let empty_shift_res = shift_up_overflow<T>(carry_in, by_bits, 0);
-        return Batch_Overflow<T>{out_trimmed, empty_shift_res.value};
-    }
+        return Batch_Overflow<T>{out_trimmed, carry_in};
 
     if(direction == Iter_Direction::FORWARD)
     {
@@ -704,14 +816,11 @@ proc shift_down_overflow_batch(Slice<T>* out, Slice<const T> in, size_t by_bits,
     {
         //@TODO: Handle carry_in! (consistently with the other edge case)
         copy_n<T>(out->data, in.data, in.size, direction);
-        return Batch_Overflow<T>{out_trimmed, 0};
+        return Batch_Overflow<T>{out_trimmed, carry_in};
     }
 
     if(in.size == 0)
-    {
-        let empty_shift_res = shift_down_overflow<T>(0, by_bits, carry_in);
-        return Batch_Overflow<T>{out_trimmed, empty_shift_res.value};
-    }
+        return Batch_Overflow<T>{out_trimmed, carry_in};
 
     if(direction == Iter_Direction::FORWARD)
     {
@@ -775,6 +884,19 @@ func compare(Slice<const T> left, Slice<const T> right) -> int
     }
 
     return 0;
+}
+
+template <typename T>
+func is_equal(Slice<const T> left, Slice<const T> right) -> bool
+{
+    if(left.size != right.size)
+        return false;
+
+    for(size_t i = 0; i < left.size; i++)
+        if(left[i] != right[i])
+            return false;
+
+    return true;
 }
 
 enum class Mul_Overflow_Optims
@@ -867,12 +989,12 @@ func mul_overflow(T left, T right, T last_value = 0) -> Overflow<T>
     T high_mixed = high_bits(s_mixed_ns) + (s_mixed_ns_overflow << h); //add overflow as another digit
 
     //distribute mixed to appropriate halves
+
     let curr_value = add_overflow_any<T>(s_cur, low_mixed, last_value); //also add last_value to save ops
     T next_value =   add_no_overflow<T>(s_next_ns, high_mixed, curr_value.overflow); //also add the overflow
 
     return Overflow<T>{curr_value.value, next_value};
 }
-
 template <typename T>
 func is_power_of_two(T num)
 {
@@ -892,6 +1014,7 @@ proc mul_overflow_batch(Slice<T>* to, Slice<const T> left, T right, T carry_in =
     T carry = carry_in;
     let trimmed_to = trim(*to, left.size);
 
+    //@TODO: compress options - make detail function out of loop
     if constexpr(DO_CONSTS)
     {
         if(right == 0) 
@@ -908,7 +1031,7 @@ proc mul_overflow_batch(Slice<T>* to, Slice<const T> left, T right, T carry_in =
     {
         if(is_power_of_two(right))
         {
-            let shift_bits = integral_log2(right);
+            let shift_bits = find_last_set_bit(right);
             return shift_up_overflow_batch<T>(to, left, shift_bits, carry_in, Iter_Direction::FORWARD);
         }
     }
@@ -984,10 +1107,6 @@ template <typename T,
 proc div_overflow_low_batch(Slice<T>* to, Slice<const T> left, T right, T carry_in = 0) -> Batch_Overflow<T>
 {
     static_assert(std::is_unsigned_v<T>);
-    //@TODO: Add options for fuzed div shift that could be used when dividing for example 0x00F100
-    //          such number is effectively a shift and low dif - this will enable us to compute so many more numbers 
-    //          using the low batch algorhitm (actually HALF_BIT_SIZE<T>^2 times more? (or something like that))
-    //          - THIS IS HUGE!!
     assert(to->size >= left.size);
     assert(high_bits(right) == 0 && "only works for divisors under half bit size");
     assert(right != 0 && "cannot divide by zero");
@@ -1007,7 +1126,7 @@ proc div_overflow_low_batch(Slice<T>* to, Slice<const T> left, T right, T carry_
     {
         if(is_power_of_two(right))
         {
-            let shift_bits = integral_log2(right);
+            let shift_bits = find_last_set_bit(right);
             let shift_res = shift_down_overflow_batch<T>(to, left, shift_bits, carry_in, Iter_Direction::BACKWARD);
             //because of the way shifting down result is defined we have to process the reuslt
             const T carry = shift_res.overflow >> (BIT_SIZE<T> - shift_bits);
@@ -1039,7 +1158,7 @@ proc rem_overflow_low_batch(Slice<const T> left, T right, T carry_in = 0) -> T
     {
         if(is_power_of_two(right))
         {
-            let shift_bits = integral_log2(right);
+            let shift_bits = find_last_set_bit(right);
             if(left.size == 0)
                 return carry_in;
 
@@ -1064,7 +1183,6 @@ struct Div_Res
     Slice<T> quotient;
     Slice<T> remainder;
 };
-
 
 template <typename T, 
     bool DO_SHIFT = DO_DEFAULT_DIV_SHIFT_OPTIMS, 
@@ -1104,7 +1222,6 @@ proc div_bit_by_bit(Slice<T>* quotient, Slice<T>* remainder, Slice<const T> num,
         let stripped_remainder = trim(*remainder, num.size);
         return wrap(Div_Res<T>{stripped_quotient, stripped_remainder});
     }
-
 
     if(den.size == 1 && high_bits(last(den)) == 0)
     {
@@ -1194,7 +1311,7 @@ proc div_bit_by_bit(Slice<T>* quotient, Slice<T>* remainder, Slice<const T> num,
 
         if(compare<T>(curr_remainder, den) >= 0)
         {
-            let sub_res = sub_overflow_batch<T>(&curr_remainder, curr_remainder, den);
+            let sub_res = sub_overflow_batch<T, true>(&curr_remainder, curr_remainder, den);
             assert(sub_res.overflow == 0 && "should not overflow");
             curr_remainder = striped_trailing_zeros<T>(curr_remainder); //for faster checks
                 
@@ -1226,7 +1343,79 @@ proc rem_bit_by_bit(Slice<T>* remainder, Slice<const T> num, Slice<const T> den)
     return wrap(div_res.remainder);
 }
 
-template <typename T>
+//performs to = added + multiplied * coef
+//During fuzed quadratic multiply will be called to add back to itself so:
+// to += multiplied * coef
+template <typename T, bool IN_PLACE = false, bool DO_CONSTS = DO_DEFAULT_MUL_CONST_OPTIMS, bool DO_SHIFT = DO_DEFAULT_MUL_SHIFT_OPTIMS>
+proc fuzed_mul_add_overflow_batch(Slice<T>* to, Slice<const T> added, Slice<const T> multiplied, T coeficient,T add_carry = 0, T mul_carry = 0) -> Batch_Overflow<T>
+{   
+    assert(added.size >= multiplied.size);
+    assert(to->size >= added.size);
+    assert(check_are_one_way_aliasing<T>(added, *to) == false);
+    assert(check_are_one_way_aliasing<T>(multiplied, *to) == false);
+
+    if constexpr(DO_CONSTS)
+    {
+        const Slice<T> trimmed_to = trim(*to, added.size);
+        if(coeficient == 0) 
+        {
+            if constexpr (IN_PLACE)
+                return Batch_Overflow<T>{trim(*to, 0), 0};
+            else
+            {
+                copy_n(to->data, added.data, added.size, Iter_Direction::FORWARD);
+                return Batch_Overflow<T>{trimmed_to, 0};
+            }
+        }
+
+        if(coeficient == 1)
+            return add_overflow_batch<T, IN_PLACE>(to, added, multiplied);
+    }
+
+    Slice<T> trimmed_to = trim(*to, added.size);
+    if(DO_SHIFT && is_power_of_two(coeficient))
+    {
+        let shift_bits = find_last_set_bit(coeficient);
+        const Slice<T> trimmed_to = trim(*to, added.size);
+        for (size_t j = 0; j < multiplied.size; j++)
+        {
+            T curr_multiplied = multiplied[j];
+            T curr_add_tp = added[j];
+
+            let mul_res = shift_up_overflow<T>(curr_multiplied, shift_bits, mul_carry);
+            let add_res = add_overflow<T>(curr_add_tp, mul_res.value, add_carry);
+
+            trimmed_to[j] = add_res.value;
+
+            mul_carry = mul_res.overflow;
+            add_carry = add_res.overflow;
+        }
+    }
+    else
+    {
+        for (size_t j = 0; j < multiplied.size; j++)
+        {
+            T curr_multiplied = multiplied[j];
+            T curr_add_tp = added[j];
+
+            let mul_res = mul_overflow<T>(curr_multiplied, coeficient, mul_carry);
+            let add_res = add_overflow<T>(curr_add_tp, mul_res.value, add_carry);
+
+            trimmed_to[j] = add_res.value;
+
+            mul_carry = mul_res.overflow;
+            add_carry = add_res.overflow;
+        }
+    }
+    
+    const T combined_carry = add_no_overflow(mul_carry, add_carry);
+    return add_overflow_batch_patch<T, IN_PLACE>(&trimmed_to, added, combined_carry, multiplied.size);
+}
+
+template <typename T,
+    bool DO_SHIFT = DO_DEFAULT_MUL_SHIFT_OPTIMS, 
+    bool DO_CONSTS = DO_DEFAULT_MUL_CONST_OPTIMS, 
+    bool DO_HALVES = DO_DEFAULT_MUL_HALF_BITS_OPTIMS>
 proc mul_quadratic(Slice<T>* to, Slice<T>* temp, Slice<const T> left, Slice<const T> right) -> void
 {
     static_assert(std::is_unsigned_v<T>);
@@ -1246,7 +1435,7 @@ proc mul_quadratic(Slice<T>* to, Slice<T>* temp, Slice<const T> left, Slice<cons
 
     for(size_t i = 0; i < right.size; i++)
     {
-        let mul_res = mul_overflow_batch<T>(temp, left, right[i]);
+        let mul_res = mul_overflow_batch<T, DO_SHIFT, DO_CONSTS, DO_HALVES>(temp, left, right[i]);
 
         let temp_num = unwrap(to_number<u64>(mul_res.slice));
 
@@ -1259,7 +1448,7 @@ proc mul_quadratic(Slice<T>* to, Slice<T>* temp, Slice<const T> left, Slice<cons
         mut shifted_to = slice(*to, i);
         assert(shifted_to.size >= mul_slice.size);
 
-        let add_res = add_overflow_batch<T>(&shifted_to, shifted_to, mul_slice);
+        let add_res = add_overflow_batch<T, true>(&shifted_to, shifted_to, mul_slice);
         assert(add_res.overflow == 0 && "no final carry should be left");
     }
 }
@@ -1282,50 +1471,11 @@ proc mul_quadratic_fused(Slice<T>* to, Slice<const T> left, Slice<const T> right
     {
         mut shifted_to = slice(*to, i);
         const T curr_right = right[i];
-        
-        if constexpr(DO_CONSTS)
-        {
-            if(curr_right == 0) 
-                continue;
 
-            if(curr_right == 1)
-            {
-                let add_res = add_overflow_batch<T>(&shifted_to, shifted_to, left);
-                assert(add_res.overflow == 0 && "no carry should happen in this case");
-                continue;
-            }
-        }
-
-        T mul_carry = 0;
-        T add_carry = 0;
-        for (size_t j = 0; j < left.size; j++)
-        {
-            T curr_left = left[j];
-            T curr_to = shifted_to[j];
-
-            let mul_res = mul_overflow<T>(curr_left, curr_right, mul_carry);
-            let add_res = add_overflow<T>(curr_to, mul_res.value, add_carry);
-
-            shifted_to[j] = add_res.value;
-
-            mul_carry = mul_res.overflow;
-            add_carry = add_res.overflow;
-        }
-
-        const T combined_carry = add_no_overflow(mul_carry, add_carry);
-        if(combined_carry != 0)
-        {
-            for (size_t j = left.size; j < shifted_to.size; j++)
-            {
-                let patch_res = add_carry_patch_step<T>(shifted_to[j], combined_carry);
-                shifted_to[j] = patch_res.value;
-                if(patch_res.overflow == 0)
-                    break;
-            }
-        }
+        let mul_add_res = fuzed_mul_add_overflow_batch<T, true, DO_CONSTS>(&shifted_to, shifted_to, left, curr_right);
+        assert(mul_add_res.overflow == 0 && "no carry should happen in this case");
     }
 }
-
 
 template <typename T>
 proc reverse(Slice<T>* arr) -> void
@@ -1336,93 +1486,39 @@ proc reverse(Slice<T>* arr) -> void
         std::swap(ref[i], ref[ref.size - i - 1]);
 }
 
-//@TODO: remove -- too general 
-template <typename From, typename To>
-proc to_big_base(Slice<const From> num, Slice<From>* div_temp1, Slice<From>* div_temp2, Slice<From>* rem_temp, Slice<To>* to, size_t base) -> Slice<To>
-{
-    static_assert(std::is_unsigned_v<From>);
-    static_assert(std::is_unsigned_v<To>);
-    constexpr let are_aliasing_4 = [](Slice<const From> a, Slice<const From> b, Slice<const From> c, Slice<const From> d)
-    {
-        return check_are_aliasing(a, b) 
-            || check_are_aliasing(a, c) 
-            || check_are_aliasing(a, d) 
-            || check_are_aliasing(b, c) 
-            || check_are_aliasing(b, d) 
-            || check_are_aliasing(c, d);
-    };
-    
-    assert(are_aliasing_4(num, *div_temp1, *div_temp2, *rem_temp) == false && "none must alias");
-    assert(is_striped_form(num)); //@TODO: maybe relax?
-    constexpr size_t item_count = digits_to_represent<From, size_t>();
-    
-    From base_rep_arr[item_count];
-    Slice<From> whole_base_rep = {base_rep_arr, item_count};
-    const Slice<From> base_rep = from_number(&whole_base_rep, base);
-
-    assert(base >= 2 && "base must be bigger than two");
-    assert(to->size >= num.size - base_rep.size && "num must fit all digits");
-
-    //@TODO: Figure out const non const spans and ptrs solution
-    Slice<From> div_to = *div_temp1;
-    Slice<From> div_to_off = *div_temp2;
-    Slice<From> div_from = {nullptr, 0}; // doesnt matter since it will be overritten anyway
-    size_t to_size = 0;
-    while(true)
-    {
-        const Slice<const From> curr_div_from = to_size == 0 ? num : div_from; 
-        if(curr_div_from.size == 0)
-            break;
-
-        let res = unwrap(div_bit_by_bit<From>(&div_to, rem_temp, curr_div_from, base_rep));
-        const To digit = unwrap(to_number<To>(res.remainder));
-        (*to)[to_size] = digit;
-        to_size ++;
-
-        div_from = res.quotient;
-        std::swap(div_to, div_to_off);
-        
-        assert(div_from.data != nullptr && "should get overriten");
-        assert(div_from.data != div_to.data && "from and to must not be the same!");
-    }
-
-    Slice<To> converted = trim(*to, to_size);
-    //reverse(&converted);
-    return converted;
-}
-
 runtime_func size_to_fit_base(double from_base, double from_size, double to_base) -> double
 {
     //const double max_from = pow(from_base, from_size);
     //const double to_size = log(max_from) / log(to_base);
-
+    assert(from_base > 1 && to_base > 1 && "base must be bigger than 2");
     const double to_size = from_size * log(from_base) / log(to_base);
     return to_size;
 }
 
 //what is the size of the output buffer when converting from number to its in base rep?
-template <integral From>
-runtime_func required_size_to_base(size_t from_size, size_t to_base) -> size_t
+template <typename From>
+runtime_func required_size_to_base(size_t num_size, size_t to_base) -> size_t
 {
-    constexpr double in_one_digit = round(pow(2, BIT_SIZE<From>));
-    return ceil(size_to_fit_base(in_one_digit, cast(double) from_size, cast(double) to_base));
+    double in_one_digit = round(pow(2, BIT_SIZE<From>));
+    return cast(size_t) ceil(size_to_fit_base(in_one_digit, cast(double) num_size, cast(double) to_base));
 }
 
 //what is the size of the output buffer when converting from base rep to number?
-template <integral From>
-runtime_func required_size_from_base(size_t from_size, size_t from_base) -> size_t
+template <typename From>
+runtime_func required_size_from_base(size_t represenation_size, size_t from_base) -> size_t
 {
-    constexpr double in_one_digit = round(pow(2, BIT_SIZE<From>));
-    return ceil(size_to_fit_base(cast(double) from_base, cast(double) from_size, in_one_digit));
+    double in_one_digit = round(pow(2, BIT_SIZE<From>));
+    return cast(size_t) ceil(size_to_fit_base(cast(double) from_base, cast(double) represenation_size, in_one_digit));
 }
 
-//@TODO: Flip args so that to is first
 template <typename From, typename To>
-proc to_base(Slice<const From> num, Slice<From>* temp, Slice<To>* rep, To base) -> Slice<To>
+proc to_base(Slice<To>* rep, Slice<From>* temp, Slice<const From> num, To base) -> Slice<To>
 {
+    //init
     static_assert(std::is_unsigned_v<From>);
+    //static_assert(sizeof(To) <= sizeof(From));
     if constexpr(std::is_same_v<From, To>)
-        assert(check_are_aliasing<T>(*num, rep) == false);
+        assert(check_are_aliasing<From>(num, *rep) == false);
 
     const From cast_base = cast(From) base;
 
@@ -1442,6 +1538,7 @@ proc to_base(Slice<const From> num, Slice<From>* temp, Slice<To>* rep, To base) 
     if(num.size == 0)
         return trim(*rep, to_size);
 
+    //convert
     Slice<From> val_left = *temp;
     while(true)
     {
@@ -1453,23 +1550,26 @@ proc to_base(Slice<const From> num, Slice<From>* temp, Slice<To>* rep, To base) 
 
         let res = div_overflow_low_batch<From>(&val_left, curr_div_from, cast_base);
         val_left = striped_trailing_zeros(val_left);
-        const To digit = cast(To) res.overflow;
+        let digit = cast(To) res.overflow;
         (*rep)[to_size] = digit;
         to_size++;
     }
 
+
+    //finish
     Slice<To> converted = trim(*rep, to_size);
     assert(is_striped_form(converted));
+    reverse(&converted);
     return converted;
 }
 
 template <typename From, typename To>
-proc from_base(Slice<const From> rep, Slice<To>* num, To base) -> Slice<To>
+proc from_base(Slice<To>* num, Slice<const From> rep, To base) -> Slice<To>
 {
     static_assert(std::is_unsigned_v<To>);
-    assert(is_striped_form(rep));
+    assert(is_reverse_striped_form(rep));
     if constexpr(std::is_same_v<From, To>)
-        assert(check_are_aliasing<T>(*rep, num) == false);
+        assert(check_are_aliasing<From>(rep, *num) == false);
 
     if constexpr (DO_RUNTIME_ONLY_CHECKS)
     {
@@ -1478,16 +1578,17 @@ proc from_base(Slice<const From> rep, Slice<To>* num, To base) -> Slice<To>
     }
 
     constexpr size_t single_num_digits = digits_to_represent<To, From>();
-    To single_num_vals[single_num_digits];
+    To single_num_vals[single_num_digits] = {0};
     Slice<To> single_num = {single_num_vals, single_num_digits};
-    
+
     null_n(num->data, num->size);
 
     for(size_t i = 0; i < rep.size; i++)
     {
-        let converted = from_number<To, From>(&single_num, rep[i]);
-        let add_res = add_overflow_batch(num, *num, converted);
-        let mul_res = mul_overflow_batch(num, *num, base);
+        let digit = rep[i];
+        let converted = from_number<To, From>(&single_num, digit);
+        let mul_res = mul_overflow_batch<To>(num, *num, base);
+        let add_res = add_overflow_batch<To, true>(num, *num, converted);
 
         assert(add_res.overflow == 0);
         assert(mul_res.overflow == 0);
