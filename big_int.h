@@ -6,6 +6,7 @@
 
 using std::integral;
 
+using Max_Unsigned_Type = u64;
 
 template <typename Grow>
 concept grower = requires(size_t to_fit, size_t capacity, size_t size, size_t static_capacity, size_t elem_size)
