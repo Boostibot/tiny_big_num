@@ -23,7 +23,7 @@ struct Batch_Op_Result
 };
 
 template<integral T>
-func make_big_int_with_size(size_t out_size) -> Big_Int_<T>
+func make_sized_big_int(size_t out_size) -> Big_Int_<T>
 {
     Big_Int_<T> out;
     resize(&out, out_size);
@@ -139,7 +139,273 @@ func make_padded_big_int(Max_Unsigned_Type val, size_t before_digits = 1, size_t
     return make_padded_big_int<T>(val, 0, before_digits, after_digits);
 }
 
-proc test_misc()
+
+u64 ipow_native(u64 x, u64 n)
+{
+    if (x <= 1) 
+        return x;
+
+    u64 y = 1;
+    for (; n != 0; n >>= 1, x *= x)
+        if (n & 1)
+            y *= x;
+
+    return y;
+}
+
+
+u64 ipow(u64 x, u64 n)
+{
+    if (x <= 1) 
+        return x;
+    if(n == 0)  
+        return 1;
+
+    u64 i = 0;
+    u64 y = 1;
+    size_t max_pos = find_last_set_bit(n);
+    for(; i <= max_pos; i++)
+    {
+        i64 bit = get_bit<u64>(n, i);
+        if(bit)
+            y *= x;
+        x *= x;
+    }
+    return y;
+}
+
+u64 trivial_ipow(u64 x, u64 n)
+{
+    u64 res = 1;
+    while(n > 0)
+    {
+        res *= x;
+        n--;
+    }
+
+    return res;
+}
+
+u64 iroot_shifting(u64 x, u64 n)
+{
+    if(n == 0)
+        return 1;
+    if (x <= 1) 
+        return x;
+
+    u64 r = 1;
+    u64 s = ((find_last_set_bit(x) / n) * n);
+
+    while(true)
+    {
+        if(s < n) //fast
+            break;
+
+        s -= n; //fast
+        r <<= 1; //O(n)
+        u64 power = ipow(r | 1, n); //slow
+        u64 bit = power <= (x >> s);
+        r |= bit;
+    }
+
+    return r;
+}
+u64 max_root_iters = 0;
+u64 max_root_value = 0;
+u64 max_root_power = 0;
+
+u64 max_log_iters = 0;
+u64 max_log_value = 0;
+u64 max_log_power = 0;
+
+
+u64 max_blog_iters = 0;
+u64 max_blog_value = 0;
+u64 max_blog_power = 0;
+
+u64 iroot_newton(u64 of_value, u64 power)
+{
+    const u64 x = of_value; 
+    const u64 n = power;
+
+    if(x == 0)
+        return 1;
+    if (x <= 1) 
+        return x;
+
+    //u64 u = x;
+    //u64 s = x+1;
+
+    // We want to find such r that:
+    //   r^n = x
+    // this can be rewritten as: 
+    //   n*log(r) = log(x)
+    // factoring r gives:
+    //   r = e^(log(x) / n)
+    //   r = 2^(log2(x) / 2)
+
+    // we want to find an initial estimate above such r so we need to increase the expression:
+    //  we will perform this by parts:
+    //  log2(x) <= [log2(x)] + 1
+    //  log2(x)/n <= upper[ ([log2(x)] + 1) / n ] = [ ([log2(x)] + 1 + n - 1) / n ]
+    //            = [ ([log2(x)] + n) / n ]
+    // 
+    //  so the upper estimate for r is:
+    //      2^[ ([log2(x)] + n) / n ]
+
+    const u64 log2x = find_last_set_bit(x);
+    
+    const u64 uppe_initial_estimate = cast(u64) 1 << ((log2x + n) / n);
+    u64 r = uppe_initial_estimate;
+    u64 prev_r = -1;
+
+    u64 iters = 0;
+    while(true)
+    {
+        // the newton update
+        u64 new_upper_r = (n-1) * r + x / ipow(r, n-1);
+
+        prev_r = r;
+        r = new_upper_r / n;
+
+        //we monotonically decrease 
+        // => prev_r should always be bigger than r
+        // => if not we break and return the last value that 
+        //     satisfied the condition (prev_r)
+        if(r >= prev_r)
+            break;
+        iters ++;
+    }
+
+    if(iters > max_root_iters)
+    {
+        max_root_iters = iters;
+        max_root_value = of_value;
+        max_root_power = power;
+    }
+
+    return prev_r;
+}
+
+u64 ilog_heyley(u64 of_value, u64 base)
+{
+    const u64 x = of_value;
+    const u64 b = base;
+
+    //b^y = x
+    //y = log_b(x)
+
+    if(x <= 1)
+        return 0;
+    if(base <= 1)
+        return 0;
+
+    const u64 log2x = find_last_set_bit(x);
+    const u64 log2b = find_last_set_bit(b);
+
+    assert(log2x != 0);
+    assert(log2b != 0);
+
+    const u64 lower_initial_estimate = log2x / (log2b + 1);
+    const u64 higher_initial_estimate = (log2x + log2b) / (log2b);
+    u64 y = higher_initial_estimate;
+    u64 prev_y = y;
+    u64 iters = 0;
+
+    while(true)
+    {
+        u64 value_from_curr_approximate = ipow(b, y);
+        u64 c_x = value_from_curr_approximate;
+
+        prev_y = y;
+        if(c_x <= x)
+            break;
+
+        u64 new_y = y - 2*(c_x - x) / (x + c_x);
+
+
+        //if we didnt move at all we are one above the answer (is equivalent to the commented out code
+        if(new_y == y)
+            return new_y - 1;
+
+        //if(new_y == y) 
+            //new_y --;
+            
+        y = new_y;
+        iters ++;
+    }
+
+
+    if(iters > max_log_iters)
+    {
+        max_log_iters = iters;
+        max_log_value = of_value;
+        max_log_power = base;
+    }
+
+    return prev_y;
+
+}
+
+u64 ilog_bsearch(u64 of_value, u64 base)
+{
+    const u64 x = of_value;
+    const u64 b = base;
+
+    
+    if(x <= 1)
+        return 0;
+    if(base <= 1)
+        return 0;
+
+    const u64 log2x = find_last_set_bit(x);
+    const u64 log2b = find_last_set_bit(b);
+
+    assert(log2x != 0);
+    assert(log2b != 0);
+
+    const u64 lower_initial_estimate = log2x / (log2b + 1);
+    const u64 higher_initial_estimate = (log2x + log2b) / (log2b);
+
+    u64 curr_lo = lower_initial_estimate;
+    u64 curr_hi = higher_initial_estimate;
+
+    u64 y = (curr_lo + curr_hi) / 2;
+    u64 iters = 0;
+
+    while(true)
+    {
+        if(curr_hi - curr_lo <= 1)
+            break;
+
+        u64 value_from_curr_approximate = ipow(b, y);
+        u64 c_x = value_from_curr_approximate;
+
+        if(c_x > x)
+            curr_hi = y;
+        else if(c_x < x)
+            curr_lo = y;
+        else
+        {
+            curr_lo = y;
+            break;
+        }
+
+        y = (curr_lo + curr_hi) / 2;
+        iters ++;
+    }
+
+    if(iters > max_blog_iters)
+    {
+        max_blog_iters = iters;
+        max_blog_value = of_value;
+        max_blog_power = base;
+    }
+
+    return curr_lo;
+}
+
+runtime_proc test_misc(Random_Generator* generator, size_t random_runs)
 {
     using Max = Max_Unsigned_Type;
 
@@ -198,6 +464,134 @@ proc test_misc()
     assert(get_bit(0b0001001, 1) == 0);
     assert(get_bit(0b0001001, 2) == 0);
     assert(get_bit(0b0001001, 3) == 1);
+
+
+    assert(ipow(3,3) == 27);
+
+    assert(iroot_shifting(8, 3) == 2);
+    assert(iroot_shifting(9, 3) == 2);
+    assert(iroot_shifting(27, 3) == 3);
+    assert(iroot_shifting(28, 3) == 3);
+    assert(iroot_shifting(29, 3) == 3);
+    assert(iroot_shifting(34, 5) == 2);
+    assert(iroot_shifting(15625, 3) == 25);
+    assert(iroot_shifting(0, 0) == 1);
+    assert(iroot_shifting(1, 0) == 1);
+    assert(iroot_shifting(4096, 6) == 4);
+    assert(iroot_shifting(18446744073709551614, 17) == 13);
+
+    assert(iroot_newton(8, 3) == 2);
+    assert(iroot_newton(9, 3) == 2);
+    assert(iroot_newton(27, 3) == 3);
+    assert(iroot_newton(28, 3) == 3);
+    assert(iroot_newton(29, 3) == 3);
+    assert(iroot_newton(34, 5) == 2);
+    assert(iroot_newton(15625, 3) == 25);
+    assert(iroot_newton(0, 0) == 1);
+    assert(iroot_newton(1, 0) == 1);
+    assert(iroot_newton(4096, 6) == 4);
+
+
+    assert(ilog_heyley(25, 2) == 4);
+    assert(ilog_heyley(255, 2) == 7);
+    assert(ilog_heyley(256, 2) == 8);
+    assert(ilog_heyley(4, 4) == 1);
+    assert(ilog_heyley(9, 3) == 2);
+    assert(ilog_heyley(26, 3) == 2);
+    assert(ilog_heyley(27, 3) == 3);
+    assert(ilog_heyley(64, 3) == 3);
+    assert(ilog_heyley(81, 3) == 4);
+    assert(ilog_heyley(16, 4) == 2);
+    assert(ilog_heyley(17, 4) == 2);
+    assert(ilog_heyley(27, 4) == 2);
+    assert(ilog_heyley(63, 4) == 2);
+    assert(ilog_heyley(64, 4) == 3);
+
+
+    assert(ilog_bsearch(25, 2) == 4);
+    assert(ilog_bsearch(255, 2) == 7);
+    assert(ilog_bsearch(256, 2) == 8);
+    assert(ilog_bsearch(4, 4) == 1);
+    assert(ilog_bsearch(9, 3) == 2);
+    assert(ilog_bsearch(26, 3) == 2);
+    assert(ilog_bsearch(27, 3) == 3);
+    assert(ilog_bsearch(64, 3) == 3);
+    assert(ilog_bsearch(81, 3) == 4);
+    assert(ilog_bsearch(16, 4) == 2);
+    assert(ilog_bsearch(17, 4) == 2);
+    assert(ilog_bsearch(27, 4) == 2);
+    assert(ilog_bsearch(63, 4) == 2);
+    assert(ilog_bsearch(64, 4) == 3);
+
+
+    constexpr u64 max = std::numeric_limits<u64>::max()/2;
+    constexpr u64 min = 2;
+    let val_dist = make_exponential_distribution<u64>(min, max);
+
+    assert(cast(u64) 1 << 42 == 4398046511104);
+    assert(ilog_heyley(4398046511104, 2) == 42);
+
+    for(size_t i = 0; i < random_runs*100; i++)
+    {
+        u64 val = cast(u64) val_dist(*generator);
+        let power_dist = make_exponential_distribution<u64>(min, val);
+        u64 power = cast(u64) power_dist(*generator);
+
+        u64 rooted = iroot_shifting(val, power);
+        u64 powed_low = ipow(rooted, power);
+        u64 back_down = iroot_shifting(powed_low, power);
+        if(rooted > 1 && powed_low < 43980465111) //so that no overflow
+        {
+            u64 loged_heyley = ilog_heyley(powed_low, rooted);
+            u64 loged_bsearch = ilog_heyley(powed_low, rooted);
+            assert(loged_heyley == power);
+            assert(loged_bsearch == power);
+        }
+
+        if(power < 100)
+        {
+            u64 ref_powed_low = trivial_ipow(rooted, power);
+            assert(ref_powed_low == powed_low);
+        }
+        else
+        {
+            //most of the time (maybe always) the diff is exactly zero 
+            // yet we still want to be sure this test wont break randomly
+            double epsilon = 0.00000000001;
+            double ref_ipow = pow(rooted, power);
+            double powed_low_d = cast(double) powed_low;
+
+            double diff = abs(ref_ipow - powed_low_d);
+            double frac = diff / cast(double) val; 
+            //we divide by val because the only way errors can happen is double conversion on
+            // large numbers => we need to only consider large numbers and their 'relative' error
+            assert(frac < epsilon);
+        }
+        assert(powed_low <= val);
+        assert(back_down == rooted);
+
+
+        u64 rooted_again = iroot_shifting(rooted, power);
+        u64 rooted_again_newton = iroot_newton(rooted, power);
+
+        assert(rooted_again == rooted_again_newton);
+    }
+
+    std::cout << "ROOT" << std::endl;
+    std::cout << "iters: " << max_root_iters << std::endl;
+    std::cout << "value: " << max_root_value << std::endl;
+    std::cout << "power: " << max_root_power << std::endl;
+
+    std::cout << "LOG" << std::endl;
+    std::cout << "iters: " << max_log_iters << std::endl;
+    std::cout << "value: " << max_log_value << std::endl;
+    std::cout << "power: " << max_log_power << std::endl;
+
+
+    std::cout << "BLOG" << std::endl;
+    std::cout << "iters: " << max_blog_iters << std::endl;
+    std::cout << "value: " << max_blog_value << std::endl;
+    std::cout << "power: " << max_blog_power << std::endl;
 }
 
 template <typename T>
@@ -213,7 +607,7 @@ runtime_proc test_add_overflow(Random_Generator* generator, size_t random_runs)
 
         mut pad_left = make_padded_big_int<T>(left_);
         mut pad_right = make_padded_big_int<T>(right_);
-        mut out = make_big_int_with_size<T>(MAX_TYPE_SIZE_FRACTION<T> + 1);
+        mut out = make_sized_big_int<T>(MAX_TYPE_SIZE_FRACTION<T> + 1);
 
         Slice<T> out_s = out;
         Slice<T> pad_left_s = pad_left.whole_num;
@@ -273,6 +667,37 @@ runtime_proc test_add_overflow(Random_Generator* generator, size_t random_runs)
         return test_add_overflow_batch(adjusted_left, adjusted_right, adjusted_carry, Res{expected, 0}, false);
     };
 
+    proc test_single_add = [](Max left, Max single){
+        Max highest_one = cast(Max) 1 << (BIT_SIZE<Max> - 1);
+        Max adjusted_left = left & ~highest_one;
+        T adjusted_single = cast(T) single & ~highest_one;
+        Max expected = adjusted_left + adjusted_single;
+
+        Big_Int_<T> left_copy = adjusted_left;
+        Big_Int_<T> left_ = adjusted_left; 
+
+        Slice<T> left_copy_s = left_copy;
+        let res2 = add_overflow_batch<T>(&left_copy_s, left_copy_s, adjusted_single, Op_Location::IN_PLACE);
+
+        bool ret = true;
+        if(left != 0)
+        {
+            Slice<T> left_s = left_;
+            let res1 = add_overflow_batch<T>(&left_s, left_s, Slice<T>{&adjusted_single, 1}, Op_Location::IN_PLACE);
+
+            bool slices = is_equal<T>(res1.slice, res2.slice);
+            bool overflows = res1.overflow == res2.overflow;
+
+            ret = ret && slices && overflows;
+        }
+        else
+        {
+            assert(res2.overflow == adjusted_single);
+        }
+
+        return ret;
+    };
+
     if constexpr(std::is_same_v<T, u8>)
     {
         assert(test_add_overflow_batch(0, 0, 0, Res{0, 0}));
@@ -302,6 +727,9 @@ runtime_proc test_add_overflow(Random_Generator* generator, size_t random_runs)
     assert(auto_test_add(23446634457799, 454406999));
     assert(auto_test_add(74984193, 982387980));
 
+    assert(test_single_add(130, cast(T) 196));
+    assert(test_single_add(74, cast(T) 173));
+
     let distribution = make_exponential_distribution<T>();
     for(size_t i = 0; i < random_runs; i++)
     {
@@ -309,6 +737,7 @@ runtime_proc test_add_overflow(Random_Generator* generator, size_t random_runs)
         Max right = distribution(*generator);
         Max carry = distribution(*generator);
         assert(auto_test_add(left, right, carry));
+        assert(test_single_add(left, cast(T) right));
     };
 }
 
@@ -325,7 +754,7 @@ runtime_proc test_sub_overflow(Random_Generator* generator, size_t random_runs)
 
         mut pad_left = make_padded_big_int<T>(left_);
         mut pad_right = make_padded_big_int<T>(right_);
-        mut out = make_big_int_with_size<T>(MAX_TYPE_SIZE_FRACTION<T> + 1);
+        mut out = make_sized_big_int<T>(MAX_TYPE_SIZE_FRACTION<T> + 1);
 
         Slice<T> out_s = out;
         Slice<T> pad_left_s = pad_left.whole_num;
@@ -419,7 +848,7 @@ runtime_proc test_complement_overflow(Random_Generator* generator, size_t random
 
     //we dont test oveflow of this op 
     proc complement_overflow_batch = [](Max left_, Max carry_in = 1) -> Max{
-        mut out = make_big_int_with_size<T>(MAX_TYPE_SIZE_FRACTION<T> + 1);
+        mut out = make_sized_big_int<T>(MAX_TYPE_SIZE_FRACTION<T> + 1);
         mut pad_left = make_padded_big_int<T>(left_);
 
         Slice<T> out_s = out;
@@ -492,7 +921,7 @@ runtime_proc test_shift_overflow(Random_Generator* generator, size_t random_runs
 
     constexpr let shift_both = [](Max left_, Max right, Max carry_in, bool up_down, Iter_Direction direction) -> Batch_Op_Result{
         mut pad_left = make_padded_big_int<T>(left_, 1, 1);
-        mut out = make_big_int_with_size<T>(MAX_TYPE_SIZE_FRACTION<T> + 1);
+        mut out = make_sized_big_int<T>(MAX_TYPE_SIZE_FRACTION<T> + 1);
         Slice<T> out_s = out;
         Slice<T> left_s = pad_left.num;
         Slice<T> pad_left_s;
@@ -627,7 +1056,7 @@ runtime_proc test_mul_overflow(Random_Generator* generator, size_t random_runs, 
 
     proc test_mul_overflow_batch = [](Max left_, Max right, Max carry_in, Res expected, Optim_Info info, bool check_overflow = true) -> bool {
         mut pad_left = make_padded_big_int<T>(left_);
-        mut out = make_big_int_with_size<T>(MAX_TYPE_SIZE_FRACTION<T> + 1);
+        mut out = make_sized_big_int<T>(MAX_TYPE_SIZE_FRACTION<T> + 1);
         
         Slice<T> out_s = out;
         Slice<T> left_s = pad_left.num;
@@ -723,7 +1152,7 @@ runtime_proc test_div_overflow_low(Random_Generator* generator, size_t random_ru
         constexpr size_t padding_before = 2;
 
         mut pad_left = make_padded_big_int<T>(left_, padding_before, MAX_TYPE_SIZE_FRACTION<T>);
-        mut out = make_big_int_with_size<T>(MAX_TYPE_SIZE_FRACTION<T> + 1);
+        mut out = make_sized_big_int<T>(MAX_TYPE_SIZE_FRACTION<T> + 1);
 
         Slice<T> out_s = out;
         Slice<T> left_s = pad_left.num;
@@ -812,7 +1241,7 @@ runtime_proc test_mul_quadratic(Random_Generator* generator, size_t random_runs)
     proc test_fused_mul_add = [](Max left_, Max right_, Max coef, Max expected, Optim_Info info = Optim_Info{}) -> bool{
         Big_Int left = left_;
         Big_Int right = right_;
-        Big_Int output = make_big_int_with_size<T>(left.size);
+        Big_Int output = make_sized_big_int<T>(left.size);
 
         Slice<T> output_s = output;
         Slice<T> left_s = left;
@@ -982,6 +1411,7 @@ runtime_proc test_div_bit_by_bit(Random_Generator* generator, size_t random_runs
     assert(auto_test_div_bit_by_bit(256*413541, 256));
     assert(auto_test_div_bit_by_bit(959464934, 1111));
     assert(auto_test_div_bit_by_bit(27417318639, 57432413));
+    assert(auto_test_div_bit_by_bit(6994935563924682752, 67877739413342216));
 
     let distribution = make_exponential_distribution<T>();
     for(size_t i = 0; i < random_runs; i++)
@@ -1007,73 +1437,137 @@ void println(Slice<T> slice)
     std::cout << "]\n";
 }
 
-template <integral From, integral To>
-runtime_proc test_to_base(Random_Generator* generator, size_t random_runs)
+template <integral Num, integral Rep>
+func to_base(Slice<const Num> num, Num base, Optim_Info info) -> Big_Int_<Rep> {
+    Big_Int_<Num> temp = Big_Int_<Num>(num);
+    Big_Int_<Rep> out = make_sized_big_int<Rep>(required_size_to_base<Num>(num.size, base));
+
+    Slice<Num> temp_s = temp;
+    Slice<Rep> out_s = out;
+
+    Slice<Rep> converted = (to_base<Num, Rep>(&out_s, &temp_s, num, base, info));
+    assert(is_striped_representation(converted));
+
+    resize(&out, converted.size);
+    return out;
+};
+
+template <integral Num, integral Rep>
+func from_base(Slice<const Rep> rep, Num base, Optim_Info info) -> Big_Int_<Num> {
+    size_t required_size = required_size_from_base<Num>(rep.size, base);
+    Big_Int_<Num> out = make_sized_big_int<Num>(required_size + 1);
+
+    Slice<Num> out_s = out;
+    Slice<Num> converted = from_base<Num, Rep>(&out_s, rep, base, info);
+
+    assert(is_striped_number(converted));
+    resize(&out, converted.size);
+    return out;
+};
+
+template <integral Num, integral Rep>
+func native_to_base(Max_Unsigned_Type num, Num base) -> Big_Int_<Rep> 
 {
     using Max = Max_Unsigned_Type;
-    func test_to_base = [](Slice<const From> num, To base, Slice<const To> expected_rep, Optim_Info info) -> bool {
-        Big_Int_<From> temp = Big_Int_<From>(num);
-        Big_Int_<To> out = make_big_int_with_size<To>(required_size_to_base<From>(num.size, base));
+    const size_t num_digits = digits_to_represent<Num, Max>();
+    const size_t max_size = required_size_to_base<Num>(num_digits, base);
 
-        Slice<From> temp_s = temp;
-        Slice<To> out_s = out;
+    Big_Int_<Rep> converted = make_sized_big_int<Rep>(max_size);
+    size_t size = 0;
+    for(Max curr_val = num; curr_val != 0; curr_val /= base, size ++)
+    {
+        Max rem = curr_val % base;
+        converted[size] = cast(Rep) rem;
+    }
 
-        Slice<To> converted = (to_base<From, To>(&out_s,&temp_s, num, base, info));
+    resize(&converted, size);
+    Slice<Rep> converted_s = converted;
+    reverse(&converted_s);
 
-        assert(is_reverse_striped_form(expected_rep));
-        assert(is_reverse_striped_form(converted));
+    return converted;
+};
 
-        return is_equal<To>(converted, expected_rep);
+template <integral Num, integral Rep>
+func native_from_base(Slice<const Rep> rep, Num base) -> Max_Unsigned_Type 
+{
+    using Max = Max_Unsigned_Type;
+    assert(is_striped_representation(rep));
+
+    Max value = 0;
+    for(size_t i = 0; i < rep.size; i++)
+    {
+        Max muled = value * base;
+        Max added = muled + rep[i];
+        assert(muled >= value);
+        assert(added >= muled);
+
+        value = added;
+    }
+
+    return value;
+};
+
+template <integral Num, integral Rep>
+runtime_proc test_to_base(Random_Generator* generator, size_t random_runs)
+{
+    static_assert(sizeof(Num) >= sizeof(Rep));
+    using Max = Max_Unsigned_Type;
+
+    func test_to_base = [](Slice<const Num> num, Num base, Slice<const Rep> expected_rep, Optim_Info info) -> bool 
+    {
+        Big_Int_<Rep> converted = to_base<Num, Rep>(num, base, info);
+        assert(is_striped_representation(expected_rep));
+
+        return is_equal<Rep>(converted, expected_rep);
     };
 
-    func manual_test_to_base = [](Max num, To base, std::initializer_list<To> expected_rep, Optim_Info info = Optim_Info{}) -> bool 
+    func manual_test_to_base = [](Max num, Num base, std::initializer_list<Rep> expected_rep, Optim_Info info = Optim_Info{}) -> bool 
     {
-        Big_Int_<From> num_ = Big_Int_<From>(num);
-        Slice<const To> expected_rep_s = {std::data(expected_rep), std::size(expected_rep)};
+        Big_Int_<Num> num_ = Big_Int_<Num>(num);
+        Slice<const Rep> expected_rep_s = {std::data(expected_rep), std::size(expected_rep)};
         return test_to_base(num_, base, expected_rep_s, info);
     };
 
-    func auto_to_base = [](Max num, To base, Optim_Info info) -> bool 
+    func auto_test_to_base = [](Max num, Num base, Optim_Info info) -> bool 
     {
-        Big_Int_<From> num_ = num;
-        Big_Int_<To> expected_rep = make_big_int_with_size<To>(required_size_to_base<From>(num_.size, base));
-        size_t size = 0;
-        for(Max curr_val = num; curr_val != 0; curr_val /= base, size ++)
-        {
-            Max rem = curr_val % base;
-            expected_rep[size] = cast(To) rem;
-        }
-
-        Slice<To> expected_rep_s = {std::data(expected_rep), size};
-        reverse(&expected_rep_s);
-        return test_to_base(num_, base, expected_rep_s, info);
+        Big_Int_<Num> num_ = num;
+        Big_Int_<Rep> expected_rep = native_to_base<Num, Rep>(num, base);
+        return test_to_base(num_, base, expected_rep, info);
     };
 
-    func test_from_base = [](Slice<const From> rep, From base, Slice<const To> expected_num, Optim_Info info) -> bool {
-        size_t required_size = required_size_from_base<To>(rep.size, base);
-        Big_Int_<To> out = make_big_int_with_size<To>(required_size);
-
-        Slice<To> out_s = out;
-        size_t from_size = sizeof(From);
-        size_t to_size = sizeof(To);
-
-        Slice<To> converted = (from_base<From, To>(&out_s, rep, base, info));
-
+    func test_from_base = [](Slice<const Rep> rep, Num base, Slice<const Num> expected_num, Optim_Info info) -> bool {
+        Big_Int_<Num> num = from_base<Num, Rep>(rep, base, info);
         
-        assert(is_reverse_striped_form(expected_num));
-        assert(is_reverse_striped_form(converted));
+        assert(is_striped_representation<const Num>(expected_num));
+        assert(is_striped_representation<const Num>(num));
 
-        //println(expected_num);
-        //println(converted);
-
-        return is_equal<To>(converted, expected_num);
+        return is_equal<Num>(num, expected_num);
     };
 
-    func manual_test_from_base = [](std::initializer_list<From> rep, From base, Max expected_num, Optim_Info info = Optim_Info{}) -> bool 
+    func manual_test_from_base = [](std::initializer_list<Rep> rep, Num base, Max expected_num, Optim_Info info = Optim_Info{}) -> bool 
     {
-        Big_Int_<To> expected_num_ = expected_num;
-        Slice<const From> rep_s = {std::data(rep), std::size(rep)};
+        Big_Int_<Num> expected_num_ = expected_num;
+        Slice<const Rep> rep_s = {std::data(rep), std::size(rep)};
         return test_from_base(rep_s, base, expected_num_, info);
+    };
+
+    func auto_test_from_base = [](Slice<const Rep> rep, Num base, Optim_Info info) -> bool 
+    {
+        Max num = native_from_base<Num, Rep>(rep, base);
+        Big_Int_<Num> expected_num = num;
+        return test_from_base(rep, base, expected_num, info);
+    };
+
+    func test_to_and_fro = [](Max value, Num base, Optim_Info info) -> bool
+    {
+        Big_Int_<Num> initial = value;
+        let rep = to_base<Num, Rep>(initial, base, info);
+        let num = from_base<Num, Rep>(rep, base, info);
+        Slice<const Num> num_s = num;
+        let obtained_value = unwrap(to_number(num_s));
+
+        bool match = is_equal<Num>(num, initial);
+        return match;
     };
 
     assert((manual_test_to_base(1, 2, {1})));
@@ -1102,35 +1596,36 @@ runtime_proc test_to_base(Random_Generator* generator, size_t random_runs)
     assert((manual_test_from_base({1,5,2,6,2,1,1}, 9, 844354)));
     assert((manual_test_from_base({8,4,4,3,5,4}, 10, 844354)));
 
-    let num_dist = make_exponential_distribution<From>();
-    constexpr size_t max_1 = std::numeric_limits<To>::max() >> HALF_BIT_SIZE<To>;
-    constexpr size_t max_2 = std::numeric_limits<From>::max() >> HALF_BIT_SIZE<From>;
+    assert((test_to_and_fro(10, 2, Optim_Info{})));
+    assert((test_to_and_fro(59180470887883776, 3, Optim_Info{})));
 
-    let base_dist = make_exponential_distribution<From, To>(2, cast(To) min(max_1, max_2));
+    let num_dist = make_exponential_distribution<Num>();
+    constexpr size_t max_1 = std::numeric_limits<Rep>::max() >> HALF_BIT_SIZE<Rep>;
+    constexpr size_t max_2 = std::numeric_limits<Num>::max() >> HALF_BIT_SIZE<Num>;
+
+    let base_dist = make_exponential_distribution<Num, Num>(2, cast(Num) min(max_1, max_2));
+    
     for(size_t i = 0; i < random_runs; i++)
     {
         Optim_Info info = generate_random_optims(generator);
         Max_Unsigned_Type num = num_dist(*generator);
-        To base = base_dist(*generator);
-        assert(auto_to_base(num, base, info));
+        Num base = base_dist(*generator);
+
+        assert(auto_test_to_base(num, base, info));
+        assert(test_to_and_fro(num, base, info));
     };
 }
 
-runtime_proc run_typed_tests()
+runtime_proc run_typed_tests(Random_Generator* generator, size_t random_runs, size_t controlled_runs)
 {
-    test_misc();
-    //test_add_overflow();
-    //test_complement_overflow();
-    //test_sub_overflow();
-    //test_shift_overflow();
-    //test_mul_overflow();
-    //test_div_overflow_low();
+    test_misc(generator, random_runs);
 }
 
 template <integral T>
 runtime_proc run_untyped_tests(Random_Generator* generator, size_t random_runs, size_t controlled_runs)
 {
     test_complement_overflow<T>(generator, random_runs);
+    test_add_overflow<T>(generator, random_runs);
     test_sub_overflow<T>(generator, random_runs);
     test_shift_overflow<T>(generator, random_runs);
     test_mul_overflow<T>(generator, random_runs, controlled_runs);
@@ -1138,11 +1633,19 @@ runtime_proc run_untyped_tests(Random_Generator* generator, size_t random_runs, 
     test_mul_quadratic<T>(generator, random_runs);
     test_div_bit_by_bit<T>(generator, random_runs);
 
+
     const size_t quarter_runs = random_runs / 4;
-    test_to_base<T, u8>(generator, quarter_runs);
-    test_to_base<T, u16>(generator, quarter_runs);
-    test_to_base<T, u32>(generator, quarter_runs);
-    test_to_base<T, u64>(generator, quarter_runs);
+    if constexpr(sizeof(T) >= sizeof(u8))
+        test_to_base<T, u8>(generator, quarter_runs);
+
+    if constexpr(sizeof(T) >= sizeof(u16))
+        test_to_base<T, u16>(generator, quarter_runs);
+
+    if constexpr(sizeof(T) >= sizeof(u32))
+        test_to_base<T, u32>(generator, quarter_runs);
+
+    if constexpr(sizeof(T) >= sizeof(u64))
+        test_to_base<T, u64>(generator, quarter_runs);
 }
 
 runtime_proc run_tests()
@@ -1154,7 +1657,7 @@ runtime_proc run_tests()
     const size_t random_runs = 1000;
     const size_t controlled_runs = 50;
 
-    run_typed_tests();
+    run_typed_tests(&generator, random_runs, controlled_runs);
     run_untyped_tests<u8>(&generator, random_runs, controlled_runs);
     run_untyped_tests<u16>(&generator, random_runs, controlled_runs);
     run_untyped_tests<u32>(&generator, random_runs, controlled_runs);
