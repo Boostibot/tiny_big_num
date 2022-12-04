@@ -7,6 +7,7 @@
 #include <limits>
 #include <initializer_list>
 #include <algorithm>
+#include <array>
 
 #include "benchmark.h"
 #include "big_int.h"
@@ -92,15 +93,15 @@ runtime_func generate_random_optims(Random_Generator* gen) -> Optim_Info
     std::uniform_int_distribution<> dist{0, 1};
     let random_bool = [&](){ return cast(bool) dist(*gen); };
 
-    Optim_Info info;
-    info.mul_shift = random_bool();
-    info.mul_consts = random_bool();
-    info.mul_half_bits = random_bool();
+    Optim_Info optims;
+    optims.mul_shift = random_bool();
+    optims.mul_consts = random_bool();
+    optims.mul_half_bits = random_bool();
 
-    info.div_shift = random_bool();
-    info.div_consts = random_bool();
-    info.rem_optims = random_bool();
-    return info;
+    optims.div_shift = random_bool();
+    optims.div_consts = random_bool();
+    optims.rem_optims = random_bool();
+    return optims;
 }
 
 template <typename T>
@@ -432,6 +433,15 @@ runtime_proc test_misc(Random_Generator* generator, size_t random_runs)
     assert(find_first_set_bit<Max>(0b010100) == 2);
     assert(find_first_set_bit<Max>(0b010010) == 1);
 
+    assert(pop_count<Max>(0b0000'0000) == 0);
+    assert(pop_count<Max>(0b0000'0001) == 1);
+    assert(pop_count<Max>(0b1000'0000) == 1);
+    assert(pop_count<Max>(0b1010'0000) == 2);
+    assert(pop_count<Max>(0b1010'0011) == 4);
+    assert(pop_count<Max>(0b0111'1111) == 7);
+    assert(pop_count<Max>(cast(u32) -1) == 32);
+    assert(pop_count<Max>(cast(Max) -1) == 64);
+
     assert(high_mask<u8>() == 0xF0);
     assert(high_mask<u8>(2) == 0b1111'1100);
     assert(high_mask<u8>(5) == 0b1110'0000);
@@ -531,7 +541,7 @@ runtime_proc test_misc(Random_Generator* generator, size_t random_runs)
     assert(cast(u64) 1 << 42 == 4398046511104);
     assert(ilog_heyley(4398046511104, 2) == 42);
 
-    for(size_t i = 0; i < random_runs*100; i++)
+    for(size_t i = 0; i < random_runs; i++)
     {
         u64 val = cast(u64) val_dist(*generator);
         let power_dist = make_exponential_distribution<u64>(min, val);
@@ -1054,7 +1064,7 @@ runtime_proc test_mul_overflow(Random_Generator* generator, size_t random_runs, 
     using Res = Batch_Op_Result;
     using Big = Big_Int_<T>;
 
-    proc test_mul_overflow_batch = [](Max left_, Max right, Max carry_in, Res expected, Optim_Info info, bool check_overflow = true) -> bool {
+    proc test_mul_overflow_batch = [](Max left_, Max right, Max carry_in, Res expected, Optim_Info optims, bool check_overflow = true) -> bool {
         mut pad_left = make_padded_big_int<T>(left_);
         mut out = make_sized_big_int<T>(MAX_TYPE_SIZE_FRACTION<T> + 1);
         
@@ -1062,8 +1072,8 @@ runtime_proc test_mul_overflow(Random_Generator* generator, size_t random_runs, 
         Slice<T> left_s = pad_left.num;
         Slice<T> pad_left_s = pad_left.whole_num;
 
-        let res1 = ::mul_overflow_batch<T>(&out_s, left_s, cast(T) right, info, cast(T) carry_in);
-        let res2 = ::mul_overflow_batch<T>(&pad_left_s, left_s, cast(T) right, info, cast(T) carry_in);
+        let res1 = ::mul_overflow_batch<T>(&out_s, left_s, cast(T) right, optims, cast(T) carry_in);
+        let res2 = ::mul_overflow_batch<T>(&pad_left_s, left_s, cast(T) right, optims, cast(T) carry_in);
 
         Slice<T> res1_s = res1.slice;
         Slice<T> res2_s = res2.slice;
@@ -1094,10 +1104,10 @@ runtime_proc test_mul_overflow(Random_Generator* generator, size_t random_runs, 
         return outputs_match && overflows_match && sizes_match;
     };
 
-    proc auto_test_mul = [](Max left, Max right, Optim_Info info) -> bool
+    proc auto_test_mul = [](Max left, Max right, Optim_Info optims) -> bool
     {
         let adjusted = adjust_to_not_mul_overflow(left, right);
-        return test_mul_overflow_batch(adjusted.left, adjusted.right, 0, Res{adjusted.left * adjusted.right, 0}, info, false);
+        return test_mul_overflow_batch(adjusted.left, adjusted.right, 0, Res{adjusted.left * adjusted.right, 0}, optims, false);
     };
 
     if constexpr(std::is_same_v<T, u8>)
@@ -1148,7 +1158,7 @@ runtime_proc test_div_overflow_low(Random_Generator* generator, size_t random_ru
 
     assert((div_overflow_low<T>(0x12, 0x0A, 0) == SRes{1, 0x08}));
 
-    proc test_div_overflow_low_batch = [](Max left_, Max right, Max carry_in, Res expected, Optim_Info info) -> bool {
+    proc test_div_overflow_low_batch = [](Max left_, Max right, Max carry_in, Res expected, Optim_Info optims) -> bool {
         constexpr size_t padding_before = 2;
 
         mut pad_left = make_padded_big_int<T>(left_, padding_before, MAX_TYPE_SIZE_FRACTION<T>);
@@ -1158,8 +1168,8 @@ runtime_proc test_div_overflow_low(Random_Generator* generator, size_t random_ru
         Slice<T> left_s = pad_left.num;
         Slice<T> pad_left_s = slice<T>(pad_left.whole_num, padding_before + 1);
 
-        let res1 = ::div_overflow_low_batch<T>(&out_s, left_s, cast(T) right, info, cast(T) carry_in);
-        let res2 = ::div_overflow_low_batch<T>(&pad_left_s, left_s, cast(T) right, info, cast(T) carry_in);
+        let res1 = ::div_overflow_low_batch<T>(&out_s, left_s, cast(T) right, optims, cast(T) carry_in);
+        let res2 = ::div_overflow_low_batch<T>(&pad_left_s, left_s, cast(T) right, optims, cast(T) carry_in);
 
         let num1 = unwrap(to_number(res1.slice));
         let num2 = unwrap(to_number(res2.slice));
@@ -1177,7 +1187,7 @@ runtime_proc test_div_overflow_low(Random_Generator* generator, size_t random_ru
         return outputs_match && overflows_match && sizes_match;
     };
     
-    proc auto_test_div = [](Max left, Max right, Optim_Info info) -> bool {
+    proc auto_test_div = [](Max left, Max right, Optim_Info optims) -> bool {
         if(right == 0)
             return true;
         
@@ -1190,7 +1200,7 @@ runtime_proc test_div_overflow_low(Random_Generator* generator, size_t random_ru
         // we dont test this yet because the setup would basically exactly mirror of the operation
         // (because its dependent on the template type)
 
-        return test_div_overflow_low_batch(left, adjusted_right, 0, Res{res, rem}, info);
+        return test_div_overflow_low_batch(left, adjusted_right, 0, Res{res, rem}, optims);
     };
 
     if constexpr(std::is_same_v<T, u8>)
@@ -1238,7 +1248,7 @@ runtime_proc test_mul_quadratic(Random_Generator* generator, size_t random_runs)
     using Res = Batch_Op_Result;
     using Big_Int = Big_Int_<T>;
 
-    proc test_fused_mul_add = [](Max left_, Max right_, Max coef, Max expected, Optim_Info info = Optim_Info{}) -> bool{
+    proc test_fused_mul_add = [](Max left_, Max right_, Max coef, Max expected, Optim_Info optims = Optim_Info{}) -> bool{
         Big_Int left = left_;
         Big_Int right = right_;
         Big_Int output = make_sized_big_int<T>(left.size);
@@ -1247,8 +1257,8 @@ runtime_proc test_mul_quadratic(Random_Generator* generator, size_t random_runs)
         Slice<T> left_s = left;
         Slice<T> right_s = right;
 
-        let res_out = ::fused_mul_add_overflow_batch<T>(&output_s, left_s, right_s, cast(T) coef, info, Op_Location::OUT_OF_PLACE);
-        let res_in = ::fused_mul_add_overflow_batch<T>(&left_s, left_s, right_s, cast(T) coef, info, Op_Location::IN_PLACE);
+        let res_out = ::fused_mul_add_overflow_batch<T>(&output_s, left_s, right_s, cast(T) coef, optims, Op_Location::OUT_OF_PLACE);
+        let res_in = ::fused_mul_add_overflow_batch<T>(&left_s, left_s, right_s, cast(T) coef, optims, Op_Location::IN_PLACE);
         
         push(&output, res_out.overflow);
         push(&left, res_in.overflow);
@@ -1259,37 +1269,46 @@ runtime_proc test_mul_quadratic(Random_Generator* generator, size_t random_runs)
         return expected == num_out && expected == num_in; 
     };
 
-    proc auto_test_fused_mul_add = [](Max left, Max right, Max coef, Optim_Info info = Optim_Info{}) -> bool{
-        return test_fused_mul_add(left, right, coef, left + coef*right, info);
+    proc auto_test_fused_mul_add = [](Max left, Max right, Max coef, Optim_Info optims = Optim_Info{}) -> bool{
+        return test_fused_mul_add(left, right, coef, left + coef*right, optims);
     };
 
-    proc test_mul_quadratic = [](Max left_, Max right_, Max expected, Optim_Info info = Optim_Info{}) -> bool{
+    proc test_mul_quadratic = [](Max left_, Max right_, Max expected, Optim_Info optims = Optim_Info{}) -> bool{
         Big_Int left = left_;
         Big_Int right = right_;
         Big_Int res;
-        Big_Int temp;
+        Big_Int aux;
 
-        resize(&temp, max(left.size, right.size) + 1);
-        resize(&res, left.size + right.size + 1);
+        size_t to_size = required_mul_to_size(left.size, right.size);
+        size_t aux_size1 = required_mul_quadratic_auxiliary_size(left.size, right.size);
+        size_t aux_size2 = required_mul_karatsuba_auxiliary_size(left.size, right.size);
+
+        size_t aux_size = max(aux_size1, aux_size2)*10; //to allow all karatsuba recursions
+
+        resize(&aux, aux_size);
+        resize(&res, to_size);
 
         Slice<T> res_s = res;
-        Slice<T> temp_s = temp;
+        Slice<T> aux_s = aux;
         Slice<const T> left_s = left;
         Slice<const T> right_s = right;
 
-        ::mul_quadratic<T>(&res_s, &temp_s, left_s, right_s, info);
+        ::mul_quadratic<T>(&res_s, &aux_s, left_s, right_s, optims);
         let normal = unwrap(to_number(res_s));
 
-        ::mul_quadratic_fused<T>(&res_s, left_s, right_s, info);
+        ::mul_quadratic_fused<T>(&res_s, left_s, right_s, optims);
         let fused = unwrap(to_number(res_s));
 
-        return expected == normal && expected == fused;
+        ::mul_karatsuba<T>(&res_s, &aux_s, left_s, right_s, optims);
+        let karatsuba = unwrap(to_number(res_s));
+
+        return expected == normal && expected == fused && expected == karatsuba;
     };
 
-    proc auto_test_mul_quadratic = [](Max left, Max right, Optim_Info info) -> bool
+    proc auto_test_mul_quadratic = [](Max left, Max right, Optim_Info optims) -> bool
     {
         let adjusted = adjust_to_not_mul_overflow(left, right);
-        return test_mul_quadratic(adjusted.left, adjusted.right, adjusted.left * adjusted.right, info);
+        return test_mul_quadratic(adjusted.left, adjusted.right, adjusted.left * adjusted.right, optims);
     };
 
     Optim_Info shift = {true, true, false};
@@ -1328,14 +1347,16 @@ runtime_proc test_mul_quadratic(Random_Generator* generator, size_t random_runs)
     assert(auto_test_mul_quadratic(0x1d15a574ce80, 0x1010, shift));
     assert(auto_test_mul_quadratic(0x1d15a574ce80, 0x7838, shift));
     assert(auto_test_mul_quadratic(0x1d15a574ce80, 0x27838, shift));
+    assert(auto_test_mul_quadratic(60136640465, 262154, shift));
 
     let distribution = make_exponential_distribution<T>();
     for(size_t i = 0; i < random_runs; i++)
     {
-        Optim_Info info = generate_random_optims(generator);
+        Optim_Info optims = generate_random_optims(generator);
         Max left = distribution(*generator);
         Max right = distribution(*generator);
-        assert(auto_test_mul_quadratic(left, right, info));
+
+        assert(auto_test_mul_quadratic(left, right, optims));
     };
 }
 
@@ -1352,7 +1373,7 @@ runtime_proc test_div_bit_by_bit(Random_Generator* generator, size_t random_runs
         OKAY
     };
 
-    let test_div_bit_by_bit = [](Max left_, Max right_, Max ex_quotient, Max ex_remainder, Will_Fail expected_fail = OKAY, Optim_Info info = Optim_Info{}) -> bool{
+    let test_div_bit_by_bit = [](Max left_, Max right_, Max ex_quotient, Max ex_remainder, Will_Fail expected_fail = OKAY, Optim_Info optims = Optim_Info{}) -> bool{
         Big_Int left = left_; 
         Big_Int right = right_;
         Big_Int res;
@@ -1366,7 +1387,7 @@ runtime_proc test_div_bit_by_bit(Random_Generator* generator, size_t random_runs
         Slice<const T> left_s = left;
         Slice<const T> right_s = right;
 
-        let div_res = ::div_bit_by_bit<T>(&res_s, &rem_s, left_s, right_s, info);
+        let div_res = ::div_bit_by_bit<T>(&res_s, &rem_s, left_s, right_s, optims);
         if(expected_fail == FAIL)
             return div_res.has == false;
 
@@ -1376,13 +1397,13 @@ runtime_proc test_div_bit_by_bit(Random_Generator* generator, size_t random_runs
     };
 
 
-    let auto_test_div_bit_by_bit = [&](Max left, Max right, Optim_Info info = Optim_Info{}) -> bool{
+    let auto_test_div_bit_by_bit = [&](Max left, Max right, Optim_Info optims = Optim_Info{}) -> bool{
         if(right == 0)
             return test_div_bit_by_bit(left, right, 0, 0, FAIL);
 
         Max quotient = left / right;
         Max remainder = left % right;
-        return test_div_bit_by_bit(left, right, quotient, remainder, OKAY, info);
+        return test_div_bit_by_bit(left, right, quotient, remainder, OKAY, optims);
     };
 
     assert(test_div_bit_by_bit(0, 0, 0, 0, FAIL));
@@ -1416,10 +1437,10 @@ runtime_proc test_div_bit_by_bit(Random_Generator* generator, size_t random_runs
     let distribution = make_exponential_distribution<T>();
     for(size_t i = 0; i < random_runs; i++)
     {
-        Optim_Info info = generate_random_optims(generator);
+        Optim_Info optims = generate_random_optims(generator);
         Max_Unsigned_Type left = distribution(*generator);
         Max_Unsigned_Type right = distribution(*generator);
-        assert(auto_test_div_bit_by_bit(left, right, info));
+        assert(auto_test_div_bit_by_bit(left, right, optims));
     };
 }
 
@@ -1437,33 +1458,165 @@ void println(Slice<T> slice)
     std::cout << "]\n";
 }
 
-template <integral Num, integral Rep>
-func to_base(Slice<const Num> num, Num base, Optim_Info info) -> Big_Int_<Rep> {
+template <integral Num, integral Rep, typename Conv_Fn>
+func to_base(Slice<const Num> num, Num base, Conv_Fn conv, Optim_Info optims) -> Big_Int_<Rep> {
     Big_Int_<Num> temp = Big_Int_<Num>(num);
     Big_Int_<Rep> out = make_sized_big_int<Rep>(required_size_to_base<Num>(num.size, base));
 
     Slice<Num> temp_s = temp;
     Slice<Rep> out_s = out;
 
-    Slice<Rep> converted = (to_base<Num, Rep>(&out_s, &temp_s, num, base, info));
+    Slice<Rep> converted = (to_base<Num, Rep>(&out_s, &temp_s, num, base, conv, optims));
     assert(is_striped_representation(converted));
 
     resize(&out, converted.size);
     return out;
 };
 
-template <integral Num, integral Rep>
-func from_base(Slice<const Rep> rep, Num base, Optim_Info info) -> Big_Int_<Num> {
+template <integral Num, integral Rep, typename Conv_Fn>
+func from_base(Slice<const Rep> rep, Num base, Conv_Fn conv, Optim_Info optims) -> Big_Int_<Num> {
     size_t required_size = required_size_from_base<Num>(rep.size, base);
     Big_Int_<Num> out = make_sized_big_int<Num>(required_size + 1);
 
     Slice<Num> out_s = out;
-    Slice<Num> converted = from_base<Num, Rep>(&out_s, rep, base, info);
+    Slice<Num> converted = from_base<Num, Rep>(&out_s, rep, base, conv, optims);
 
     assert(is_striped_number(converted));
     resize(&out, converted.size);
     return out;
 };
+
+func stringlen(const char* str) -> size_t
+{
+    if(str == nullptr)
+        return 0;
+
+    size_t size = 0;
+    while(str[size] != '\0')
+        size ++;
+
+    return size;
+}
+
+template <integral Num = Max_Unsigned_Type>
+func to_base(Slice<const Num> num, Num base = 10) -> Big_Int_<char> {
+    assert(base > 2);
+    assert(base <= 36);
+
+    constexpr char val_to_char_table[36] = {
+        '0', '1', '2', '3', '4', '5', '6', '7', '8', '9',
+        'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J',
+        'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T',
+        'U', 'V', 'W', 'X', 'Y', 'Z'
+    };
+    
+    let conversion = [&](Num value) -> char {
+        assert(value < 36);
+        return val_to_char_table[value];
+    };
+
+    return to_base<Num, char>(num, base, conversion, Optim_Info{});
+}
+
+template <integral Num = Max_Unsigned_Type>
+func from_base(const char* str, Num base = 10) -> Trivial_Maybe<Big_Int_<Num>> {
+    assert(base > 2);
+    assert(base <= 36);
+
+    proc make_table = [](){
+        std::array<Num, 255> table;
+
+        for(size_t i = 0; i < table.size(); i++)
+            table[i] = cast(Num) -1;
+
+        table['0'] = 0;
+        table['1'] = 1;
+        table['2'] = 2;
+        table['3'] = 3;
+        table['4'] = 4;
+        table['5'] = 5;
+        table['6'] = 6;
+        table['7'] = 7;
+        table['8'] = 8;
+        table['9'] = 9;
+        table['A'] = 10;
+        table['a'] = 10;
+        table['B'] = 11;
+        table['b'] = 11;
+        table['C'] = 12;
+        table['c'] = 12;
+        table['D'] = 13;
+        table['d'] = 13;
+        table['E'] = 14;
+        table['e'] = 14;
+        table['F'] = 15;
+        table['f'] = 15;
+        table['G'] = 16;
+        table['g'] = 16;
+        table['H'] = 17;
+        table['h'] = 17;
+        table['I'] = 18;
+        table['i'] = 18;
+        table['J'] = 19;
+        table['j'] = 19;
+        table['K'] = 20;
+        table['k'] = 20;
+        table['L'] = 21;
+        table['l'] = 21;
+        table['M'] = 22;
+        table['m'] = 22;
+        table['N'] = 23;
+        table['n'] = 23;
+        table['O'] = 24;
+        table['o'] = 24;
+        table['P'] = 25;
+        table['p'] = 25;
+        table['Q'] = 26;
+        table['q'] = 26;
+        table['R'] = 27;
+        table['r'] = 27;
+        table['S'] = 28;
+        table['s'] = 28;
+        table['T'] = 29;
+        table['t'] = 29;
+        table['U'] = 30;
+        table['u'] = 30;
+        table['V'] = 31;
+        table['v'] = 32;
+        table['W'] = 32;
+        table['w'] = 32;
+        table['X'] = 33;
+        table['x'] = 33;
+        table['Y'] = 34;
+        table['y'] = 34;
+        table['Z'] = 35;
+        table['z'] = 35;
+
+        return table;
+    };
+
+    constexpr std::array<Num, 255> char_to_val_table = make_table();
+
+    bool ok = true;
+    let conversion = [&](char value) -> Num {
+        Num val = char_to_val_table[value];
+        if(val == -1)
+        {
+            ok = false;
+            return 0;
+        }
+
+        return val;
+    };
+
+    Slice<const char> rep{str, stringlen(str)};
+    Big_Int_<Num> res = from_base<Num, char>(rep, base, conversion, Optim_Info{});
+
+    if(ok)
+        return wrap(res);
+    else
+        return {};
+}
 
 template <integral Num, integral Rep>
 func native_to_base(Max_Unsigned_Type num, Num base) -> Big_Int_<Rep> 
@@ -1513,30 +1666,35 @@ runtime_proc test_to_base(Random_Generator* generator, size_t random_runs)
     static_assert(sizeof(Num) >= sizeof(Rep));
     using Max = Max_Unsigned_Type;
 
-    func test_to_base = [](Slice<const Num> num, Num base, Slice<const Rep> expected_rep, Optim_Info info) -> bool 
+    proc id_to_conversion = [](Num num) -> Rep {return cast(Rep) num;};
+    proc id_from_conversion = [](Rep num) -> Num {return cast(Num) num;};
+
+    func test_to_base = [](Slice<const Num> num, Num base, Slice<const Rep> expected_rep, Optim_Info optims) -> bool 
     {
-        Big_Int_<Rep> converted = to_base<Num, Rep>(num, base, info);
+        Big_Int_<Rep> converted = to_base<Num, Rep>(num, base, id_to_conversion, optims);
+        
         assert(is_striped_representation(expected_rep));
 
         return is_equal<Rep>(converted, expected_rep);
     };
 
-    func manual_test_to_base = [](Max num, Num base, std::initializer_list<Rep> expected_rep, Optim_Info info = Optim_Info{}) -> bool 
+    func manual_test_to_base = [](Max num, Num base, std::initializer_list<Rep> expected_rep, Optim_Info optims = Optim_Info{}) -> bool 
     {
         Big_Int_<Num> num_ = Big_Int_<Num>(num);
         Slice<const Rep> expected_rep_s = {std::data(expected_rep), std::size(expected_rep)};
-        return test_to_base(num_, base, expected_rep_s, info);
+        return test_to_base(num_, base, expected_rep_s, optims);
     };
 
-    func auto_test_to_base = [](Max num, Num base, Optim_Info info) -> bool 
+    func auto_test_to_base = [](Max num, Num base, Optim_Info optims) -> bool 
     {
         Big_Int_<Num> num_ = num;
         Big_Int_<Rep> expected_rep = native_to_base<Num, Rep>(num, base);
-        return test_to_base(num_, base, expected_rep, info);
+        return test_to_base(num_, base, expected_rep, optims);
     };
 
-    func test_from_base = [](Slice<const Rep> rep, Num base, Slice<const Num> expected_num, Optim_Info info) -> bool {
-        Big_Int_<Num> num = from_base<Num, Rep>(rep, base, info);
+    func test_from_base = [](Slice<const Rep> rep, Num base, Slice<const Num> expected_num, Optim_Info optims) -> bool 
+    {
+        Big_Int_<Num> num = from_base<Num, Rep>(rep, base, id_from_conversion, optims);
         
         assert(is_striped_representation<const Num>(expected_num));
         assert(is_striped_representation<const Num>(num));
@@ -1544,25 +1702,25 @@ runtime_proc test_to_base(Random_Generator* generator, size_t random_runs)
         return is_equal<Num>(num, expected_num);
     };
 
-    func manual_test_from_base = [](std::initializer_list<Rep> rep, Num base, Max expected_num, Optim_Info info = Optim_Info{}) -> bool 
+    func manual_test_from_base = [](std::initializer_list<Rep> rep, Num base, Max expected_num, Optim_Info optims = Optim_Info{}) -> bool 
     {
         Big_Int_<Num> expected_num_ = expected_num;
         Slice<const Rep> rep_s = {std::data(rep), std::size(rep)};
-        return test_from_base(rep_s, base, expected_num_, info);
+        return test_from_base(rep_s, base, expected_num_, optims);
     };
 
-    func auto_test_from_base = [](Slice<const Rep> rep, Num base, Optim_Info info) -> bool 
+    func auto_test_from_base = [](Slice<const Rep> rep, Num base, Optim_Info optims) -> bool 
     {
         Max num = native_from_base<Num, Rep>(rep, base);
         Big_Int_<Num> expected_num = num;
-        return test_from_base(rep, base, expected_num, info);
+        return test_from_base(rep, base, expected_num, optims);
     };
 
-    func test_to_and_fro = [](Max value, Num base, Optim_Info info) -> bool
+    func test_to_and_fro = [](Max value, Num base, Optim_Info optims) -> bool
     {
         Big_Int_<Num> initial = value;
-        let rep = to_base<Num, Rep>(initial, base, info);
-        let num = from_base<Num, Rep>(rep, base, info);
+        let rep = to_base<Num, Rep>(initial, base, id_to_conversion, optims);
+        let num = from_base<Num, Rep>(rep, base, id_from_conversion, optims);
         Slice<const Num> num_s = num;
         let obtained_value = unwrap(to_number(num_s));
 
@@ -1607,13 +1765,72 @@ runtime_proc test_to_base(Random_Generator* generator, size_t random_runs)
     
     for(size_t i = 0; i < random_runs; i++)
     {
-        Optim_Info info = generate_random_optims(generator);
+        Optim_Info optims = generate_random_optims(generator);
         Max_Unsigned_Type num = num_dist(*generator);
         Num base = base_dist(*generator);
 
-        assert(auto_test_to_base(num, base, info));
-        assert(test_to_and_fro(num, base, info));
+        assert(auto_test_to_base(num, base, optims));
+        assert(test_to_and_fro(num, base, optims));
     };
+}
+
+template <integral T>
+runtime_proc test_pow_by_squaring(Random_Generator* generator, size_t random_runs)
+{
+    using Max = Max_Unsigned_Type;
+    using Big_Int = Big_Int_<T>;
+    using CSlice = Slice<const T>;
+    using Slice = Slice<T>;
+
+    proc pow_by_squaring_ = [](CSlice num, T pow, Optim_Info optims) -> Big_Int {
+        size_t required_size = required_pow_to_size(num, pow);
+        size_t aux_size = required_pow_auxiliary_size(num, pow)*100; //for karatsuba
+        Big_Int out = make_sized_big_int<T>(required_size);
+        Big_Int aux = make_sized_big_int<T>(aux_size);
+
+        Slice out_s = out;
+        Slice aux_s = aux;
+
+        Slice powed = ::pow_by_squaring<T>(&out_s, &aux_s, num, pow, optims);
+        resize(&out, powed.size);
+
+        return out;
+    };
+
+    proc pow_by_squaring = [](Max num, Max pow, Optim_Info optims = Optim_Info{}) -> Max {
+        Big_Int num_ = num;
+        Big_Int powed = pow_by_squaring_(num_, cast(T) pow, optims);
+        Slice powed_s = powed;
+
+        Max res = unwrap(to_number(powed_s));
+        return res;
+    };
+
+    proc test_pow = [](CSlice num, T pow, CSlice expected, Optim_Info optims) -> bool {
+        Big_Int powed = pow_by_squaring_(num, pow, optims);
+        Slice powed_s = powed;
+
+        assert(is_striped_number(powed_s));
+        assert(is_striped_number(expected));
+        
+        return is_equal<T>(powed_s, expected);
+    };
+
+    assert(pow_by_squaring(0, 0) == 1);
+    assert(pow_by_squaring(0, 1) == 0);
+    assert(pow_by_squaring(0, 54) == 0);
+    assert(pow_by_squaring(0, 5554135) == 0);
+    assert(pow_by_squaring(2, 0) == 1);
+    assert(pow_by_squaring(1048576, 0) == 1);
+    assert(pow_by_squaring(5465313, 1) == 5465313);
+    assert(pow_by_squaring(5465313, 2) == 5465313ull*5465313ull);
+    assert(pow_by_squaring(2, 10) == 1024);
+    assert(pow_by_squaring(2, 20) == 1048576);
+    assert(pow_by_squaring(3, 10) == 59049);
+    assert(pow_by_squaring(3, 20) == 59049ull*59049ull);
+    assert(pow_by_squaring(9, 10) == 59049ull*59049ull);
+
+    assert(pow_by_squaring(5465, 3) == 5465ull*5465ull*5465ull);
 }
 
 runtime_proc run_typed_tests(Random_Generator* generator, size_t random_runs, size_t controlled_runs)
@@ -1632,6 +1849,7 @@ runtime_proc run_untyped_tests(Random_Generator* generator, size_t random_runs, 
     test_div_overflow_low<T>(generator, random_runs, controlled_runs);
     test_mul_quadratic<T>(generator, random_runs);
     test_div_bit_by_bit<T>(generator, random_runs);
+    test_pow_by_squaring<T>(generator, random_runs);
 
 
     const size_t quarter_runs = random_runs / 4;
