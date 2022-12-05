@@ -147,7 +147,6 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="benchmark.h" />
-    <ClInclude Include="big_int.h" />
     <ClInclude Include="big_int_ops.h" />
     <ClInclude Include="preface.h" />
     <ClInclude Include="tests.h" />

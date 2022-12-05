@@ -3,6 +3,11 @@
 #include "preface.h"
 
 
+#ifndef DO_RUNTIME_ONLY 
+    //prevents compile time execution when on
+    #define DO_RUNTIME_ONLY true
+#endif
+
 #ifndef DO_OPTIM_MUL_SHIFT
     #define DO_OPTIM_MUL_SHIFT false
 #endif
@@ -27,21 +32,20 @@
     #define DO_OPTIM_REM_OPTIMS false
 #endif
 
-#ifndef DO_RUNTIME_ONLY 
-    //prevents compile time execution when on
-    #define DO_RUNTIME_ONLY true
-#endif
-
 #ifndef MAX_RECURSION_DEPTH 
     #define MAX_RECURSION_DEPTH 10
 #endif
 
-#ifndef MUL_QUADRATIC_SINGLE_BELOW 
-    #define MUL_QUADRATIC_SINGLE_BELOW 3
+#ifndef MUL_QUADRATIC_SINGLE_BELOW_SIZE 
+    #define MUL_QUADRATIC_SINGLE_BELOW_SIZE 3
 #endif
 
-#ifndef MUL_QUADRATIC_BOTH_BELOW 
-    #define MUL_QUADRATIC_BOTH_BELOW 4
+#ifndef MUL_QUADRATIC_BOTH_BELOW_SIZE 
+    #define MUL_QUADRATIC_BOTH_BELOW_SIZE 4
+#endif
+
+#ifndef TRIVIAL_POW_BELOW_POWER 
+    #define TRIVIAL_POW_BELOW_POWER 4
 #endif
 
 struct Optim_Info
@@ -49,13 +53,14 @@ struct Optim_Info
     bool mul_shift = DO_OPTIM_MUL_SHIFT;
     bool mul_consts = DO_OPTIM_MUL_CONSTS;
     bool mul_half_bits = DO_OPTIM_MUL_HALF_BITS;
-
     bool div_shift = DO_OPTIM_DIV_SHIFT;
     bool div_consts = DO_OPTIM_DIV_CONSTS;
     bool rem_optims = DO_OPTIM_REM_OPTIMS;
+
     size_t max_reusion_depth = MAX_RECURSION_DEPTH;
-    size_t mul_quadratic_both_below = MUL_QUADRATIC_BOTH_BELOW;
-    size_t mul_quadratic_single_below = MUL_QUADRATIC_SINGLE_BELOW;
+    size_t mul_quadratic_both_below_size = MUL_QUADRATIC_BOTH_BELOW_SIZE;
+    size_t mul_quadratic_single_below_size = MUL_QUADRATIC_SINGLE_BELOW_SIZE;
+    size_t trivial_pow_below_power = TRIVIAL_POW_BELOW_POWER;
 };
 
 template <typename T>
@@ -93,6 +98,7 @@ struct Slice
     constexpr operator Slice<const T>() const noexcept { return Slice<const T>{this->data, this->size};}
 };
 
+//portion
 template <typename T>
 func slice(Slice<T> slice, size_t from, size_t count)
 {
@@ -100,12 +106,15 @@ func slice(Slice<T> slice, size_t from, size_t count)
     return Slice<T>{slice.data + from, count};
 }
 
+//between
 template <typename T>
 func slice_to(Slice<T> slice, size_t from, size_t to)
 {
     assert(to >= from);
     return ::slice<T>(slice, from, to - from);
 }
+
+//before - after ?
 template <typename T>
 func slice(Slice<T> slice, size_t from) -> Slice<T> {
     return ::slice<T>(slice, from, slice.size - from);
@@ -1623,13 +1632,8 @@ proc fused_mul_add_overflow_batch(Slice<T>* to, Slice<const T> added, Slice<cons
     return consume_carry<T>(&trimmed_to, added, combined_carry, multiplied.size, Consume_Op::ADD, location);
 }
 
-
-
-
-
 template <typename T>
 proc mul(Slice<T>* to, Slice<T>* aux, Slice<const T> left, Slice<const T> right, Optim_Info const& optims, size_t depth = 0);
-
 
 func required_mul_quadratic_auxiliary_size(size_t left_size, size_t right_size) -> size_t
 {
@@ -1880,14 +1884,14 @@ proc mul(Slice<T>* to, Slice<T>* aux, Slice<const T> left, Slice<const T> right,
     }
 
 
-    if(min_size >= optims.mul_quadratic_single_below 
-        && max_size >= optims.mul_quadratic_both_below 
+    if(min_size >= optims.mul_quadratic_single_below_size 
+        && max_size >= optims.mul_quadratic_both_below_size 
         && depth < optims.max_reusion_depth)
     {
         size_t required_aux = required_mul_karatsuba_auxiliary_size(max_size, min_size);
         if(aux->size >= required_aux)
         {
-            bool is_run_alone = optims.mul_quadratic_single_below == 0;
+            bool is_run_alone = optims.mul_quadratic_single_below_size <= 1;
             ret = mul_karatsuba(to, aux, left, right, optims, depth, is_run_alone);
             assert(is_striped_number(ret));
             return ret;
@@ -1911,7 +1915,7 @@ func log2(Slice<const T> left) -> size_t
 }
 
 template <typename T>
-func required_pow_to_size(Slice<const T> num, T power) -> size_t
+func required_pow_to_size(Slice<const T> num, size_t power) -> size_t
 {
     if(power == 0 || num.size == 0)
         return 1;
@@ -1924,7 +1928,7 @@ func required_pow_to_size(Slice<const T> num, T power) -> size_t
 
 
 template <typename T>
-func required_pow_single_auxiliary_swap_size(Slice<const T> num, T power) -> size_t
+func required_pow_by_squaring_single_auxiliary_swap_size(Slice<const T> num, size_t power) -> size_t
 {
     if(power == 0)
         return 0;
@@ -1937,20 +1941,23 @@ func required_pow_single_auxiliary_swap_size(Slice<const T> num, T power) -> siz
     return item_size;
 }
 
+
 template <typename T>
-func required_pow_auxiliary_size(Slice<const T> num, T power) -> size_t
+func required_pow_by_squaring_auxiliary_size(Slice<const T> num, size_t power) -> size_t
 {
     if(power == 0)
         return 0;
     
-    size_t square = required_pow_single_auxiliary_swap_size(num, power);
+    size_t square = required_pow_by_squaring_single_auxiliary_swap_size(num, power);
     size_t out_swap = required_pow_to_size(num, power);
 
     return square * 2 + out_swap;
 }
 
+
+
 template <typename T>
-proc pow_by_squaring(Slice<T>* to, Slice<T>* aux, Slice<const T> num, T power, Optim_Info const& optims) -> Slice<T>
+proc pow_by_squaring(Slice<T>* to, Slice<T>* aux, Slice<const T> num, size_t power, Optim_Info const& optims) -> Slice<T>
 {
     assert(is_striped_number(num));
     //no two can alias
@@ -1959,12 +1966,12 @@ proc pow_by_squaring(Slice<T>* to, Slice<T>* aux, Slice<const T> num, T power, O
     assert(are_aliasing<T>(*aux, *to) == false);
 
     const size_t required_size = required_pow_to_size(num, power);
-    const size_t required_sigle_aux = required_pow_single_auxiliary_swap_size<T>(num, power);
+    const size_t required_sigle_aux = required_pow_by_squaring_single_auxiliary_swap_size<T>(num, power);
 
     assert(to->size >= required_size);
-    assert(aux->size >= required_pow_auxiliary_size(num, power));
+    assert(aux->size >= required_pow_by_squaring_auxiliary_size(num, power));
 
-    if(power == 0 || (num.size == 1 && last(num) == 1))
+    if(power == 0 || (num.size == 1 && num[0] == 1))
     {
         mut out = trim(*to, 1);
         out[0] = 1;
@@ -2016,7 +2023,7 @@ proc pow_by_squaring(Slice<T>* to, Slice<T>* aux, Slice<const T> num, T power, O
 
     for(size_t i = 0; i <= max_pos; i++)
     {
-        T bit = get_bit<T>(power, i);
+        size_t bit = get_bit(power, i);
         if(bit)
         {
             //curr_output *= curr_square;
@@ -2036,6 +2043,98 @@ proc pow_by_squaring(Slice<T>* to, Slice<T>* aux, Slice<const T> num, T power, O
     assert(curr_output.data == to->data);
     assert(is_striped_number(curr_output));
     return curr_output;
+}
+
+
+template <typename T>
+func required_trivial_pow_auxiliary_size(Slice<const T> num, size_t power) -> size_t
+{
+    if(power <= 1)
+        return 0;
+
+    //minus one since in the algorhitm we always multiply from output buffer to auxiliary
+    // so that the final mutliply will be to the output buffer
+    // => the maximum power that will be stored in the auxiliary is one less
+    return required_pow_to_size(num, power - 1);
+}
+
+
+template <typename T>
+proc trivial_pow(Slice<T>* to, Slice<T>* aux, Slice<const T> num, size_t power, Optim_Info const& optims)
+{
+    assert(is_striped_number(num));
+
+    assert(are_aliasing<T>(*to, num) == false);
+    assert(are_aliasing<T>(*aux, num) == false);
+    assert(are_aliasing<T>(*aux, *to) == false);
+
+    const size_t required_to_size = required_pow_to_size(num, power);
+    const size_t required_aux_size = required_trivial_pow_auxiliary_size(num, power);
+    assert(to->size >= required_to_size);
+    assert(aux->size >= required_aux_size);
+
+    if(power == 0 || (num.size == 1 && num[0] == 1))
+    {
+        mut out = trim(*to, 1);
+        out[0] = 1;
+        return out;
+    }
+
+    if(num.size == 0)
+        return trim(*to, 0);
+
+    Slice<T> output_aux1 = trim(*to, required_to_size);
+    Slice<T> output_aux2 = trim(*aux, required_aux_size);
+
+    Slice<T> remianing_aux = slice(*aux, required_aux_size);
+
+    // we shoudl start with an appropiate one so that we finnish in the *to buffer
+    const size_t num_assignments = power - 1;
+    if(num_assignments % 2 != 0)
+        std::swap(output_aux1, output_aux2);
+
+    Slice<T> curr = trim(output_aux1, num.size);
+    copy_slice<T>(&curr, num, Iter_Direction::ANY);
+
+    for(size_t i = 0; i < num_assignments; i++)
+    {
+        Slice<T> next = mul<T>(&output_aux2, &remianing_aux, curr, num, optims);
+        std::swap(output_aux1, output_aux2);
+        curr = next;
+    }
+
+    assert(curr.data == to->data && "we should finish in the output buffer");
+    assert(is_striped_number(curr));
+    return curr;
+}
+
+//@TODO: figure out optim constant checks - maybe do similar to mul_karatsuba
+//@TODO: implement mul constant optims into the mul proc
+template <typename T>
+proc pow(Slice<T>* to, Slice<T>* aux, Slice<const T> num, size_t power, Optim_Info const& optims)
+{
+    size_t at_least_to = required_pow_to_size(num, power);
+    size_t at_least_aux = required_trivial_pow_auxiliary_size(num, power);
+    size_t single_swap = required_pow_by_squaring_single_auxiliary_swap_size(num, power);
+    size_t by_square_aux = 
+    assert(to->size < at_least_to);
+    assert(aux->size < at_least_aux);
+
+
+    size_t iters = find_last_set_bit(power);
+    size_t bits = (log2(num) + 1);
+    //we square the number on every iteration => the number of bits doubles => 2^bits == bits << iters
+    size_t bit_size = bits << iters; 
+    size_t item_size = div_round_up(bit_size, BIT_SIZE<T>) + 1;
+
+    if(power > optims.trivial_pow_below_power )
+    {
+    }
+
+
+    return trivial_pow<T>(to, aux, num, power, optims);
+    //figure out to what power we can use else trivial_pow 
+    //do optims here
 }
 
 template <typename T>
