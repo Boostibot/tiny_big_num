@@ -1434,6 +1434,20 @@ struct Div_Res
     Slice<T> remainder;
 };
 
+
+func required_div_quotient_size(size_t num_size, size_t den_size) -> size_t
+{
+    if(num_size < den_size)
+        return 0;
+
+    return num_size - den_size + 1;
+}
+
+func required_div_remainder_size(size_t num_size, size_t den_size) -> size_t
+{
+    return min(den_size + 1, num_size);;
+}
+
 template <typename T, bool DO_QUOTIENT = true>
 proc div_bit_by_bit(Slice<T>* quotient, Slice<T>* remainder, Slice<const T> num, Slice<const T> den, Optim_Info const& optims) -> Trivial_Maybe<Div_Res<T>>
 {
@@ -1444,6 +1458,9 @@ proc div_bit_by_bit(Slice<T>* quotient, Slice<T>* remainder, Slice<const T> num,
     assert(check_are_aliasing<T>(*remainder, num) == false);
     assert(check_are_aliasing<T>(*quotient, den) == false);
     assert(check_are_aliasing<T>(*remainder, den) == false);
+
+    const size_t required_quot_size = DO_QUOTIENT ? required_div_quotient_size(num.size, den.size) : 0;
+    const size_t required_rem_size = required_div_remainder_size(num.size, den.size);
 
     if(DO_QUOTIENT)
         assert(check_are_aliasing<T>(*quotient, *remainder) == false);
@@ -1460,24 +1477,22 @@ proc div_bit_by_bit(Slice<T>* quotient, Slice<T>* remainder, Slice<const T> num,
 
     if(num.size < den.size)
     {
-        copy_n(remainder->data, num.data, num.size, Iter_Direction::FORWARD);
+        assert(remainder->size >= num.size);
+        mut stripped_remainder = trim(*remainder, num.size);
+        mut stripped_quotient = trim(*quotient, 0);
 
-        let stripped_quotient = trim(*quotient, 0);
-        let stripped_remainder = trim(*remainder, num.size);
+        copy_slice<T>(&stripped_remainder, num, Iter_Direction::ANY);
         return wrap(Div_Res<T>{stripped_quotient, stripped_remainder});
     }
 
-    size_t min_size = min(den.size + 1, num.size);
-    Slice<T> trimmed_remainder = trim(*remainder, min_size);
-    Slice<T> trimmed_quotient = trim(*quotient, 0);    
+    //@TODO: move up
+    Slice<T> trimmed_remainder = trim(*remainder, required_rem_size);
+    Slice<T> trimmed_quotient = trim(*quotient, required_quot_size);    
 
     if(DO_QUOTIENT)
-    {
-        trimmed_quotient = trim(*quotient, num.size - den.size + 1); //+1 is for num / 1 => then the quotient is just the num
-        null_n(trimmed_quotient.data, trimmed_quotient.size);
-    }
+        null_slice(&trimmed_quotient);
 
-    null_n(trimmed_remainder.data, trimmed_remainder.size);
+    null_slice(&trimmed_remainder);
     if(den.size == 1 && high_bits(last(den)) == 0)
     {
         assert(trimmed_remainder.size > 0 && "at this point should not be 0");

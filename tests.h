@@ -75,9 +75,9 @@ namespace test
 
 
     template<typename T>
-    func make_sized_vector(size_t size, Allocator<T> alloc) -> Vector<T>
+    func make_sized_vector(size_t size, Memory_Resource* resource) -> Vector<T>
     {
-        Vector<T> vec(std::move(alloc));
+        Vector<T> vec(std::move(resource));
         if(size != 0)
             vec.resize(size);
         return vec;
@@ -98,9 +98,9 @@ namespace test
 
 
     template<typename T>
-    func make_vector_of_slice(Slice<const T> const& slice, Allocator<T> alloc) -> Vector<T>
+    func make_vector_of_slice(Slice<const T> const& slice, Memory_Resource* resource) -> Vector<T>
     {
-        mut vec = make_sized_vector(slice.size, alloc);
+        mut vec = make_sized_vector<T>(slice.size, resource);
         mut vec_slice = to_slice(&vec);
         copy_slice<T>(&vec_slice, slice, Iter_Direction::ANY);
 
@@ -108,10 +108,10 @@ namespace test
     }
 
     template<typename T>
-    func make_vector_of_digits(Unsigned_Max val, Allocator<T> alloc) -> Vector<T>
+    func make_vector_of_digits(Unsigned_Max val, Memory_Resource* resource) -> Vector<T>
     {
         constexpr size_t count = digits_to_represent<T, Unsigned_Max>();
-        Vector<T> vec = make_sized_vector(count, alloc);
+        Vector<T> vec = make_sized_vector<T>(count, resource);
         Slice<T> slice = to_slice(&vec);
         Slice<T> converted_slice = from_number<T>(&slice, val);
         vec.resize(converted_slice.size);
@@ -128,14 +128,14 @@ namespace test
     };
 
     template <typename T>
-    func make_padded_vector_of_digits(Unsigned_Max val, Allocator<T> alloc, size_t pref_size = 1, size_t post_size = 1) -> Padded_Vector<T>
+    func make_padded_vector_of_digits(Unsigned_Max val, Memory_Resource* resource, size_t pref_size = 1, size_t post_size = 1) -> Padded_Vector<T>
     {
         constexpr size_t count = digits_to_represent<T, Unsigned_Max>();
         size_t total_size = pref_size + count + post_size;
 
         Padded_Vector<T> padded;
 
-        padded.vector = make_sized_vector(total_size, alloc);
+        padded.vector = make_sized_vector<T>(total_size, resource);
         Slice<T> whole = to_slice(&padded.vector);
         Slice<T> digits = slice(whole, pref_size, count);
         Slice<T> content = from_number<T>(&digits, val);
@@ -173,7 +173,7 @@ namespace test
     template <typename T>
     constexpr size_t MAX_TYPE_SIZE_FRACTION = sizeof(Unsigned_Max) / sizeof(T);
 
-    constexpr size_t RELEASE_MEMORY_EVERY = 1000;
+    constexpr size_t RELEASE_MEMORY_EVERY = 10;
 
     template <typename T>
     struct Uniform_Exponential_Distribution
@@ -653,7 +653,7 @@ namespace test
     }
 
     template <typename T>
-    runtime_proc test_add_overflow(Memory_Resource* resource, Random_Generator* generator, size_t random_runs)
+    runtime_proc test_add_overflow(Memory_Resource* upstream, Random_Generator* generator, size_t random_runs)
     {
         using Res = Batch_Op_Result;
         using Max = Unsigned_Max;
@@ -662,16 +662,16 @@ namespace test
         using CSlice = Slice<const T>;
         using Slice = Slice<T>;
 
-        std::pmr::monotonic_buffer_resource local_buffer{resource};
-        Allocator<T> alloc = &local_buffer;
+        std::pmr::monotonic_buffer_resource local_buffer{upstream};
+        Memory_Resource* resource = upstream;
         
         runtime_proc test_add_overflow_batch = [&](Max left_, Max right_, Max carry_in, Res expected, bool check_overflow = true) -> bool {
-            Vector left = make_vector_of_digits<T>(left_, alloc);
-            Vector right = make_vector_of_digits<T>(right_, alloc);
-            Vector out = make_sized_vector<T>(MAX_TYPE_SIZE_FRACTION<T> + 1, alloc);
+            Vector left = make_vector_of_digits<T>(left_, resource);
+            Vector right = make_vector_of_digits<T>(right_, resource);
+            Vector out = make_sized_vector<T>(MAX_TYPE_SIZE_FRACTION<T> + 1, resource);
 
-            Padded pad_left = make_padded_vector_of_digits<T>(left_, alloc, 1);
-            Padded pad_right = make_padded_vector_of_digits<T>(right_, alloc, 1);
+            Padded pad_left = make_padded_vector_of_digits<T>(left_, resource, 1);
+            Padded pad_right = make_padded_vector_of_digits<T>(right_, resource, 1);
 
             Slice out_s = to_slice<T>(&out);
             Slice pad_left_s = to_slice<T>(&pad_left.vector);
@@ -743,8 +743,8 @@ namespace test
 
             Max expected = adjusted_left + adjusted_single;
 
-            mut left1 = make_vector_of_digits<T>(adjusted_left, alloc); 
-            mut left2 = make_vector_of_digits<T>(adjusted_left, alloc);
+            mut left1 = make_vector_of_digits<T>(adjusted_left, resource); 
+            mut left2 = make_vector_of_digits<T>(adjusted_left, resource);
 
             Slice left1_s = to_slice(&left1);
             Slice left2_s = to_slice(&left2);
@@ -807,7 +807,7 @@ namespace test
 
     
     template <typename T>
-    runtime_proc test_sub_overflow(Memory_Resource* resource, Random_Generator* generator, size_t random_runs)
+    runtime_proc test_sub_overflow(Memory_Resource* upstream, Random_Generator* generator, size_t random_runs)
     {
         using Res = Batch_Op_Result;
         using Max = Unsigned_Max;
@@ -816,16 +816,16 @@ namespace test
         using CSlice = Slice<const T>;
         using Slice = Slice<T>;
 
-        std::pmr::monotonic_buffer_resource local_buffer{resource};
-        Allocator<T> alloc = &local_buffer;
+        std::pmr::monotonic_buffer_resource local_buffer{upstream};
+        Memory_Resource* resource = upstream;
 
         runtime_proc test_sub_overflow_batch = [&](Max left_, Max right_, Max carry_in, Res expected, bool check_overflow = true) -> bool {
-            Vector left = make_vector_of_digits<T>(left_, alloc);
-            Vector right = make_vector_of_digits<T>(right_, alloc);
-            Vector out = make_sized_vector<T>(MAX_TYPE_SIZE_FRACTION<T> + 1, alloc);
+            Vector left = make_vector_of_digits<T>(left_, resource);
+            Vector right = make_vector_of_digits<T>(right_, resource);
+            Vector out = make_sized_vector<T>(MAX_TYPE_SIZE_FRACTION<T> + 1, resource);
 
-            Padded pad_left = make_padded_vector_of_digits<T>(left_, alloc, 1);
-            Padded pad_right = make_padded_vector_of_digits<T>(right_, alloc, 1);
+            Padded pad_left = make_padded_vector_of_digits<T>(left_, resource, 1);
+            Padded pad_right = make_padded_vector_of_digits<T>(right_, resource, 1);
 
             Slice out_s = to_slice<T>(&out);
             Slice pad_left_s = to_slice<T>(&pad_left.vector);
@@ -917,7 +917,7 @@ namespace test
     }
 
     template <typename T>
-    runtime_proc test_complement_overflow(Memory_Resource* resource, Random_Generator* generator, size_t random_runs)
+    runtime_proc test_complement_overflow(Memory_Resource* upstream, Random_Generator* generator, size_t random_runs)
     {
         using Res = Batch_Op_Result;
         using Max = Unsigned_Max;
@@ -926,13 +926,13 @@ namespace test
         using CSlice = Slice<const T>;
         using Slice = Slice<T>;
 
-        std::pmr::monotonic_buffer_resource local_buffer{resource};
-        Allocator<T> alloc = &local_buffer;
+        std::pmr::monotonic_buffer_resource local_buffer{upstream};
+        Memory_Resource* resource = upstream;
 
         //we dont test oveflow of this op 
         runtime_proc complement_overflow_batch = [&](Max left_, Max carry_in = 1) -> Max{
-            Padded pad_left = make_padded_vector_of_digits<T>(left_, alloc, 1);
-            Vector out = make_sized_vector<T>(MAX_TYPE_SIZE_FRACTION<T> + 1, alloc);
+            Padded pad_left = make_padded_vector_of_digits<T>(left_, resource, 1);
+            Vector out = make_sized_vector<T>(MAX_TYPE_SIZE_FRACTION<T> + 1, resource);
 
             Slice left_s = content(&pad_left);
             Slice out_s = to_slice<T>(&out);
@@ -1001,7 +1001,7 @@ namespace test
     }
 
     template <typename T>
-    runtime_proc test_shift_overflow(Memory_Resource* resource, Random_Generator* generator, size_t random_runs)
+    runtime_proc test_shift_overflow(Memory_Resource* upstream, Random_Generator* generator, size_t random_runs)
     {
         using Res = Batch_Op_Result;
         using Max = Unsigned_Max;
@@ -1010,12 +1010,12 @@ namespace test
         using CSlice = Slice<const T>;
         using Slice = Slice<T>;
 
-        std::pmr::monotonic_buffer_resource local_buffer{resource};
-        Allocator<T> alloc = &local_buffer;
+        std::pmr::monotonic_buffer_resource local_buffer{upstream};
+        Memory_Resource* resource = upstream;
 
         runtime_proc shift_both = [&](Max left_, Max right, Max carry_in, bool up_down, Iter_Direction direction) -> Batch_Op_Result{
-            Padded pad_left = make_padded_vector_of_digits<T>(left_, alloc, 1);
-            Vector out = make_sized_vector<T>(MAX_TYPE_SIZE_FRACTION<T> + 1, alloc);
+            Padded pad_left = make_padded_vector_of_digits<T>(left_, resource, 1);
+            Vector out = make_sized_vector<T>(MAX_TYPE_SIZE_FRACTION<T> + 1, resource);
 
             Slice left_s = content(&pad_left);
             Slice out_s = to_slice<T>(&out);
@@ -1148,7 +1148,7 @@ namespace test
     }
 
     template <typename T>
-    runtime_proc test_mul_overflow(Memory_Resource* resource, Random_Generator* generator, size_t random_runs, size_t controlled_runs)
+    runtime_proc test_mul_overflow(Memory_Resource* upstream, Random_Generator* generator, size_t random_runs, size_t controlled_runs)
     {
         using Res = Batch_Op_Result;
         using Max = Unsigned_Max;
@@ -1157,12 +1157,12 @@ namespace test
         using CSlice = Slice<const T>;
         using Slice = Slice<T>;
 
-        std::pmr::monotonic_buffer_resource local_buffer{resource};
-        Allocator<T> alloc = &local_buffer;
+        std::pmr::monotonic_buffer_resource local_buffer{upstream};
+        Memory_Resource* resource = upstream;
 
         runtime_proc test_mul_overflow_batch = [&](Max left_, Max right, Max carry_in, Res expected, Optim_Info optims, bool check_overflow = true) -> bool {
-            Padded pad_left = make_padded_vector_of_digits<T>(left_, alloc, 1);
-            Vector out = make_sized_vector<T>(MAX_TYPE_SIZE_FRACTION<T> + 1, alloc);
+            Padded pad_left = make_padded_vector_of_digits<T>(left_, resource, 1);
+            Vector out = make_sized_vector<T>(MAX_TYPE_SIZE_FRACTION<T> + 1, resource);
 
             Slice left_s = content(&pad_left);
             Slice out_s = to_slice<T>(&out);
@@ -1251,7 +1251,7 @@ namespace test
     }
 
     template <typename T>
-    runtime_proc test_div_overflow_low(Memory_Resource* resource, Random_Generator* generator, size_t random_runs, size_t controlled_runs)
+    runtime_proc test_div_overflow_low(Memory_Resource* upstream, Random_Generator* generator, size_t random_runs, size_t controlled_runs)
     {
         using Res = Batch_Op_Result;
         using Max = Unsigned_Max;
@@ -1262,14 +1262,14 @@ namespace test
 
         assert((div_overflow_low<T>(0x12, 0x0A, 0) == Overflow<T>{1, 0x08}));
 
-        std::pmr::monotonic_buffer_resource local_buffer{resource};
-        Allocator<T> alloc = &local_buffer;
+        std::pmr::monotonic_buffer_resource local_buffer{upstream};
+        Memory_Resource* resource = upstream;
 
         runtime_proc test_div_overflow_low_batch = [&](Max left_, Max right, Max carry_in, Res expected, Optim_Info optims) -> bool {
             constexpr size_t padding_before = 2;
 
-            Padded pad_left = make_padded_vector_of_digits<T>(left_, alloc, 1);
-            Vector out = make_sized_vector<T>(MAX_TYPE_SIZE_FRACTION<T> + 1, alloc);
+            Padded pad_left = make_padded_vector_of_digits<T>(left_, resource, 1);
+            Vector out = make_sized_vector<T>(MAX_TYPE_SIZE_FRACTION<T> + 1, resource);
 
             Slice left_s = content(&pad_left);
             Slice out_s = to_slice<T>(&out);
@@ -1354,7 +1354,7 @@ namespace test
     }
 
     template <typename T>
-    runtime_proc test_mul_quadratic(Memory_Resource* resource, Random_Generator* generator, size_t random_runs)
+    runtime_proc test_mul_quadratic(Memory_Resource* upstream, Random_Generator* generator, size_t random_runs)
     {
         using Res = Batch_Op_Result;
         using Max = Unsigned_Max;
@@ -1363,13 +1363,13 @@ namespace test
         using CSlice = Slice<const T>;
         using Slice = Slice<T>;
 
-        std::pmr::monotonic_buffer_resource local_buffer{resource};
-        Allocator<T> alloc = &local_buffer;
+        std::pmr::monotonic_buffer_resource local_buffer{upstream};
+        Memory_Resource* resource = upstream;
 
         runtime_proc test_fused_mul_add = [&](Max left_, Max right_, Max coef, Max expected, Optim_Info optims = Optim_Info{}) -> bool{
-            Vector left = make_vector_of_digits<T>(left_, alloc);
-            Vector right = make_vector_of_digits<T>(right_, alloc);
-            Vector output = make_sized_vector<T>(left.size(), alloc);
+            Vector left = make_vector_of_digits<T>(left_, resource);
+            Vector right = make_vector_of_digits<T>(right_, resource);
+            Vector output = make_sized_vector<T>(left.size(), resource);
 
             Slice left_s = to_slice(&left);
             Slice right_s = to_slice(&right);
@@ -1395,8 +1395,8 @@ namespace test
         };
 
         runtime_proc test_mul_quadratic = [&](Max left_, Max right_, Max expected, Optim_Info optims = Optim_Info{}) -> bool{
-            Vector left = make_vector_of_digits<T>(left_, alloc);
-            Vector right = make_vector_of_digits<T>(right_, alloc);
+            Vector left = make_vector_of_digits<T>(left_, resource);
+            Vector right = make_vector_of_digits<T>(right_, resource);
 
             size_t to_size = required_mul_to_size(left.size(), right.size());
             size_t aux_size1 = required_mul_quadratic_auxiliary_size(left.size(), right.size());
@@ -1404,8 +1404,8 @@ namespace test
 
             size_t aux_size = max(aux_size1, aux_size2)*10; //to allow all karatsuba recursions
 
-            Vector res = make_sized_vector(to_size, alloc);
-            Vector aux = make_sized_vector(aux_size, alloc);
+            Vector res = make_sized_vector<T>(to_size, resource);
+            Vector aux = make_sized_vector<T>(aux_size, resource);
 
             Slice res_s = to_slice(&res);
             Slice aux_s = to_slice(&aux);
@@ -1484,9 +1484,8 @@ namespace test
         };
     }
 
-    /*
     template <typename T>
-    runtime_proc test_div_bit_by_bit(Memory_Resource* resource, Random_Generator* generator, size_t random_runs)
+    runtime_proc test_div_bit_by_bit(Memory_Resource* upstream, Random_Generator* generator, size_t random_runs)
     {
         using Res = Batch_Op_Result;
         using Max = Unsigned_Max;
@@ -1501,29 +1500,30 @@ namespace test
             OKAY
         };
 
-        std::pmr::monotonic_buffer_resource local_buffer{resource};
-        Allocator<T> alloc = &local_buffer;
+        std::pmr::monotonic_buffer_resource local_buffer{upstream};
+        Memory_Resource* resource = upstream;
 
-        runtime_proc test_div_bit_by_bit = [&](Max left_, Max right_, Max ex_quotient, Max ex_remainder, Will_Fail expected_fail = OKAY, Optim_Info optims = Optim_Info{}) -> bool{
-            Big_Int left = left_; 
-            Big_Int right = right_;
-            Big_Int res;
-            Big_Int rem;
+        runtime_proc test_div_bit_by_bit = [&](Max num_, Max den_, Max ex_quotient, Max ex_remainder, Will_Fail expected_fail = OKAY, Optim_Info optims = Optim_Info{}) -> bool{
+            Vector num = make_vector_of_digits<T>(num_, resource); 
+            Vector den = make_vector_of_digits<T>(den_, resource);
+            size_t quo_size = required_div_quotient_size(num.size(), den.size());
+            size_t rem_size = required_div_remainder_size(num.size(), den.size());
 
-            resize(&rem, max(left.size, right.size));
-            resize(&res, max(left.size, right.size));
+            Vector quo = make_sized_vector<T>(quo_size, resource); 
+            Vector rem = make_sized_vector<T>(rem_size, resource);
 
-            Slice<T> res_s = res;
-            Slice<T> rem_s = rem;
-            Slice<const T> left_s = left;
-            Slice<const T> right_s = right;
+            Slice quo_s = to_slice(&quo);
+            Slice rem_s = to_slice(&rem);
+            Slice num_s = to_slice(&num);
+            Slice den_s = to_slice(&den);
 
-            let div_res = ::div_bit_by_bit<T>(&res_s, &rem_s, left_s, right_s, optims);
+            let div_res = ::div_bit_by_bit<T>(&quo_s, &rem_s, num_s, den_s, optims);
             if(expected_fail == FAIL)
                 return div_res.has == false;
 
-            let quotient = unwrap(to_number(res_s));
-            let remainder = unwrap(to_number(rem_s));
+            let unwrapped = unwrap(div_res);
+            let quotient = unwrap(to_number(unwrapped.quotient));
+            let remainder = unwrap(to_number(unwrapped.remainder));
             return ex_quotient == quotient && ex_remainder == remainder && div_res.has;
         };
 
@@ -1594,30 +1594,30 @@ namespace test
     }
 
     template <typename Num, typename Rep, typename Conv_Fn>
-    func to_base(Slice<const Num> num, Num base, Conv_Fn conv, Optim_Info optims) -> Vector<Rep> {
-        Vector<Num> temp = Vector<Num>(num);
-        Vector<Rep> out = make_sized_vector<Rep>(required_size_to_base<Num>(num.size, base));
+    func to_base(Slice<const Num> num, Num base, Conv_Fn conv, Optim_Info optims, Memory_Resource* resource) -> Vector<Rep> {
+        Vector<Num> temp = make_vector_of_slice<Num>(num, resource);
+        Vector<Rep> out = make_sized_vector<Rep>(required_size_to_base<Num>(num.size, base), resource);
 
-        Slice<Num> temp_s = temp;
-        Slice<Rep> out_s = out;
+        Slice<Num> temp_s = to_slice(&temp);
+        Slice<Rep> out_s = to_slice(&out);
 
         Slice<Rep> converted = (to_base<Num, Rep>(&out_s, &temp_s, num, base, conv, optims));
         assert(is_striped_representation(converted));
 
-        resize(&out, converted.size);
+        out.resize(converted.size);
         return out;
     };
 
     template <typename Num, typename Rep, typename Conv_Fn>
-    func from_base(Slice<const Rep> rep, Num base, Conv_Fn conv, Optim_Info optims) -> Vector<Num> {
+    func from_base(Slice<const Rep> rep, Num base, Conv_Fn conv, Optim_Info optims, Memory_Resource* resource) -> Vector<Num> {
         size_t required_size = required_size_from_base<Num>(rep.size, base);
-        Vector<Num> out = make_sized_vector<Num>(required_size + 1);
+        Vector<Num> out = make_sized_vector<Num>(required_size + 1, resource); //@TODO: why is there the +1
 
-        Slice<Num> out_s = out;
+        Slice<Num> out_s = to_slice(&out);
         Slice<Num> converted = from_base<Num, Rep>(&out_s, rep, base, conv, optims);
 
         assert(is_striped_number(converted));
-        resize(&out, converted.size);
+        out.resize(converted.size);
         return out;
     };
 
@@ -1634,7 +1634,7 @@ namespace test
     }
 
     template <typename Num = Unsigned_Max>
-    func to_base(Slice<const Num> num, Num base = 10) -> Vector<char> {
+    func to_base(Slice<const Num> num, Num base, Memory_Resource* resource) -> Vector<char> {
         assert(base > 2);
         assert(base <= 36);
 
@@ -1650,11 +1650,11 @@ namespace test
             return val_to_char_table[value];
         };
 
-        return to_base<Num, char>(num, base, conversion, Optim_Info{});
+        return to_base<Num, char>(num, base, conversion, Optim_Info{}, resource);
     }
 
     template <typename Num = Unsigned_Max>
-    func from_base(const char* str, Num base = 10) -> Trivial_Maybe<Vector<Num>> {
+    func from_base(const char* str, Num base, Memory_Resource* resource) -> Trivial_Maybe<Vector<Num>> {
         assert(base > 2);
         assert(base <= 36);
 
@@ -1745,7 +1745,7 @@ namespace test
         };
 
         Slice<const char> rep{str, stringlen(str)};
-        Vector<Num> res = from_base<Num, char>(rep, base, conversion, Optim_Info{});
+        Vector<Num> res = from_base<Num, char>(rep, base, conversion, Optim_Info{}, resource);
 
         if(ok)
             return wrap(res);
@@ -1754,13 +1754,13 @@ namespace test
     }
 
     template <typename Num, typename Rep>
-    func native_to_base(Unsigned_Max num, Num base) -> Vector<Rep> 
+    func native_to_base(Unsigned_Max num, Num base, Memory_Resource* resource) -> Vector<Rep> 
     {
         using Max = Unsigned_Max;
         const size_t num_digits = digits_to_represent<Num, Max>();
         const size_t max_size = required_size_to_base<Num>(num_digits, base);
 
-        Vector<Rep> converted = make_sized_vector<Rep>(max_size);
+        Vector<Rep> converted = make_sized_vector<Rep>(max_size, resource);
         size_t size = 0;
         for(Max curr_val = num; curr_val != 0; curr_val /= base, size ++)
         {
@@ -1768,8 +1768,8 @@ namespace test
             converted[size] = cast(Rep) rem;
         }
 
-        resize(&converted, size);
-        Slice<Rep> converted_s = converted;
+        converted.resize(size);
+        Slice<Rep> converted_s = to_slice(&converted);
         reverse(&converted_s);
 
         return converted;
@@ -1796,80 +1796,73 @@ namespace test
     };
 
     template <typename Num, typename Rep>
-    runtime_proc test_to_base(Memory_Resource* resource, Random_Generator* generator, size_t random_runs)
+    runtime_proc test_to_base(Memory_Resource* upstream, Random_Generator* generator, size_t random_runs)
     {
         static_assert(sizeof(Num) >= sizeof(Rep));
         using Max = Unsigned_Max;
 
-        using Res = Batch_Op_Result;
-        using Max = Unsigned_Max;
-        using Vector = Vector<T>;
-        using Padded = Padded_Vector<T>;
-        using CSlice = Slice<const T>;
-        using Slice = Slice<T>;
-
-        std::pmr::monotonic_buffer_resource local_buffer{resource};
-        Allocator<T> alloc = &local_buffer;
+        std::pmr::monotonic_buffer_resource local_buffer{upstream};
+        Memory_Resource* resource = upstream;
 
         proc id_to_conversion = [](Num num) -> Rep {return cast(Rep) num;};
         proc id_from_conversion = [](Rep num) -> Num {return cast(Num) num;};
 
         runtime_proc test_to_base = [&](Slice<const Num> num, Num base, Slice<const Rep> expected_rep, Optim_Info optims) -> bool 
         {
-            Vector<Rep> converted = to_base<Num, Rep>(num, base, id_to_conversion, optims);
+            Vector<Rep> converted = to_base<Num, Rep>(num, base, id_to_conversion, optims, resource);
         
             assert(is_striped_representation(expected_rep));
 
-            return is_equal<Rep>(converted, expected_rep);
+            return is_equal<Rep>(to_slice(converted), expected_rep);
         };
 
         runtime_proc manual_test_to_base = [&](Max num, Num base, std::initializer_list<Rep> expected_rep, Optim_Info optims = Optim_Info{}) -> bool 
         {
-            Vector<Num> num_ = Vector<Num>(num);
+            Vector<Num> num_ = make_vector_of_digits<Num>(num, resource);
             Slice<const Rep> expected_rep_s = {std::data(expected_rep), std::size(expected_rep)};
-            return test_to_base(num_, base, expected_rep_s, optims);
+            return test_to_base(to_slice(num_), base, expected_rep_s, optims);
         };
 
         runtime_proc auto_test_to_base = [&](Max num, Num base, Optim_Info optims) -> bool 
         {
-            Vector<Num> num_ = num;
-            Vector<Rep> expected_rep = native_to_base<Num, Rep>(num, base);
-            return test_to_base(num_, base, expected_rep, optims);
+            Vector<Num> num_ = make_vector_of_digits<Num>(num, resource);
+            Vector<Rep> expected_rep = native_to_base<Num, Rep>(num, base, resource);
+            return test_to_base(to_slice(num_), base, to_slice(expected_rep), optims);
         };
 
         runtime_proc test_from_base = [&](Slice<const Rep> rep, Num base, Slice<const Num> expected_num, Optim_Info optims) -> bool 
         {
-            Vector<Num> num = from_base<Num, Rep>(rep, base, id_from_conversion, optims);
+            Vector<Num> num = from_base<Num, Rep>(rep, base, id_from_conversion, optims, resource);
         
-            assert(is_striped_representation<const Num>(expected_num));
-            assert(is_striped_representation<const Num>(num));
+            assert(is_striped_representation(expected_num));
+            assert(is_striped_representation(to_slice(num)));
 
-            return is_equal<Num>(num, expected_num);
+            return is_equal<Num>(to_slice(num), expected_num);
         };
 
         runtime_proc manual_test_from_base = [&](std::initializer_list<Rep> rep, Num base, Max expected_num, Optim_Info optims = Optim_Info{}) -> bool 
         {
-            Vector<Num> expected_num_ = expected_num;
+            Vector<Num> expected_num_ = make_vector_of_digits<Num>(expected_num, resource);
             Slice<const Rep> rep_s = {std::data(rep), std::size(rep)};
-            return test_from_base(rep_s, base, expected_num_, optims);
+            return test_from_base(rep_s, base, to_slice(expected_num_), optims);
         };
 
         runtime_proc auto_test_from_base = [&](Slice<const Rep> rep, Num base, Optim_Info optims) -> bool 
         {
             Max num = native_from_base<Num, Rep>(rep, base);
-            Vector<Num> expected_num = num;
-            return test_from_base(rep, base, expected_num, optims);
+            Vector<Num> expected_num = make_vector_of_digits<Num>(num, resource);
+            return test_from_base(rep, base, to_slice(expected_num), optims);
         };
 
         runtime_proc test_to_and_fro = [&](Max value, Num base, Optim_Info optims) -> bool
         {
-            Vector<Num> initial = value;
-            let rep = to_base<Num, Rep>(initial, base, id_to_conversion, optims);
-            let num = from_base<Num, Rep>(rep, base, id_from_conversion, optims);
-            Slice<const Num> num_s = num;
+            Vector<Num> initial = make_vector_of_digits<Num>(value, resource);
+            let rep = to_base<Num, Rep>(to_slice(initial), base, id_to_conversion, optims, resource);
+            let num = from_base<Num, Rep>(to_slice(rep), base, id_from_conversion, optims, resource);
+            Slice<const Num> num_s = to_slice(num);
             let obtained_value = unwrap(to_number(num_s));
 
-            bool match = is_equal<Num>(num, initial);
+            bool match = is_equal<Num>(to_slice(num), to_slice(initial));
             return match;
         };
 
@@ -1924,7 +1917,7 @@ namespace test
     }
 
     template <typename T>
-    runtime_proc test_pow_by_squaring(Memory_Resource* resource, Random_Generator* generator, size_t random_runs, size_t controlled_runs)
+    runtime_proc test_pow_by_squaring(Memory_Resource* upstream, Random_Generator* generator, size_t random_runs, size_t controlled_runs)
     {
         using Res = Batch_Op_Result;
         using Max = Unsigned_Max;
@@ -1933,17 +1926,17 @@ namespace test
         using CSlice = Slice<const T>;
         using Slice = Slice<T>;
 
-        std::pmr::monotonic_buffer_resource local_buffer{resource};
-        Allocator<T> alloc = &local_buffer;
+        std::pmr::monotonic_buffer_resource local_buffer{upstream};
+        Memory_Resource* resource = upstream;
 
-        runtime_proc pow_ = [&](CSlice num, size_t pow, Optim_Info optims, bool do_trivial) -> Big_Int {
+        runtime_proc pow_ = [&](CSlice num, size_t pow, Optim_Info optims, bool do_trivial) -> Vector {
             size_t required_size = required_pow_to_size(num, pow);
             size_t aux_size = required_pow_by_squaring_auxiliary_size(num, pow)*100; //for karatsuba
-            Big_Int out = make_sized_vector<T>(required_size);
-            Big_Int aux = make_sized_vector<T>(aux_size);
+            Vector out = make_sized_vector<T>(required_size, resource);
+            Vector aux = make_sized_vector<T>(aux_size, resource);
 
-            Slice out_s = out;
-            Slice aux_s = aux;
+            Slice out_s = to_slice(&out);
+            Slice aux_s = to_slice(&aux);
 
             Slice powed;
             if(do_trivial)
@@ -1951,15 +1944,14 @@ namespace test
             else
                 powed = ::pow_by_squaring<T>(&out_s, &aux_s, num, pow, optims);
 
-            resize(&out, powed.size);
-
+            out.resize(powed.size);
             return out;
         };
 
         runtime_proc pow = [&](Max num, size_t pow, Optim_Info optims, bool do_trivial) -> Max {
-            Big_Int num_ = num;
-            Big_Int powed = pow_(num_, pow, optims, do_trivial);
-            Slice powed_s = powed;
+            Vector num_ = make_vector_of_digits<T>(num, resource);
+            Vector powed = pow_(to_slice(num_), pow, optims, do_trivial);
+            CSlice powed_s = to_slice(powed);
 
             Max res = unwrap(to_number(powed_s));
             return res;
@@ -1974,8 +1966,8 @@ namespace test
         };
 
         runtime_proc test_pow = [&](CSlice num, size_t pow, CSlice expected, Optim_Info optims) -> bool {
-            Big_Int powed = pow_(num, pow, optims, false);
-            Slice powed_s = powed;
+            Vector powed = pow_(num, pow, optims, false);
+            CSlice powed_s = to_slice(powed);
 
             assert(is_striped_number(powed_s));
             assert(is_striped_number(expected));
@@ -2012,40 +2004,39 @@ namespace test
         assert(pow_by_squaring(9, 10) == 59049ull*59049ull);
         assert(pow_by_squaring(5465, 3) == 5465ull*5465ull*5465ull);
     }
-    */
     
-    runtime_proc run_typed_tests(Memory_Resource* resource, Random_Generator* generator, size_t random_runs, size_t controlled_runs)
+    runtime_proc run_typed_tests(Memory_Resource* upstream, Random_Generator* generator, size_t random_runs, size_t controlled_runs)
     {
         test_misc(generator, random_runs);
     }
 
     template <typename T>
-    runtime_proc run_untyped_tests(Memory_Resource* resource, Random_Generator* generator, size_t random_runs, size_t controlled_runs)
+    runtime_proc run_untyped_tests(Memory_Resource* upstream, Random_Generator* generator, size_t random_runs, size_t controlled_runs)
     {
-        test_add_overflow<T>(resource, generator, random_runs);
-        test_sub_overflow<T>(resource, generator, random_runs);
-        test_complement_overflow<T>(resource, generator, random_runs);
-        test_shift_overflow<T>(resource, generator, random_runs);
-        test_mul_overflow<T>(resource, generator, random_runs, controlled_runs);
-        test_div_overflow_low<T>(resource, generator, random_runs, controlled_runs);
-        test_mul_quadratic<T>(resource, generator, random_runs);
-        //test_div_bit_by_bit<T>(resource, generator, random_runs);
-        //test_pow_by_squaring<T>(resource, generator, random_runs);
+        test_add_overflow<T>(upstream, generator, random_runs);
+        test_sub_overflow<T>(upstream, generator, random_runs);
+        test_complement_overflow<T>(upstream, generator, random_runs);
+        test_shift_overflow<T>(upstream, generator, random_runs);
+        test_mul_overflow<T>(upstream, generator, random_runs, controlled_runs);
+        test_div_overflow_low<T>(upstream, generator, random_runs, controlled_runs);
+        test_mul_quadratic<T>(upstream, generator, random_runs);
+        test_div_bit_by_bit<T>(upstream, generator, random_runs);
+        test_pow_by_squaring<T>(upstream, generator, random_runs, controlled_runs);
 
-        /*
+        
         const size_t quarter_runs = random_runs / 4;
         if constexpr(sizeof(T) >= sizeof(u8))
-            test_to_base<T, u8>(generator, quarter_runs);
+            test_to_base<T, u8>(upstream, generator, quarter_runs);
 
         if constexpr(sizeof(T) >= sizeof(u16))
-            test_to_base<T, u16>(generator, quarter_runs);
+            test_to_base<T, u16>(upstream, generator, quarter_runs);
 
         if constexpr(sizeof(T) >= sizeof(u32))
-            test_to_base<T, u32>(generator, quarter_runs);
+            test_to_base<T, u32>(upstream, generator, quarter_runs);
 
         if constexpr(sizeof(T) >= sizeof(u64))
-            test_to_base<T, u64>(generator, quarter_runs);
-        */
+            test_to_base<T, u64>(upstream, generator, quarter_runs);
+        
     }
 
     runtime_proc run_tests()
@@ -2054,15 +2045,17 @@ namespace test
         const u32 seed = os_seed();
 
         Random_Generator generator(seed);
-        const size_t random_runs = 10000;
-        const size_t controlled_runs = 500;
+        const size_t random_runs = 1000;
+        const size_t controlled_runs = 50;
 
-        std::pmr::unsynchronized_pool_resource pool;
+        //std::pmr::unsynchronized_pool_resource pool;
+        //Memory_Resource* res = &pool;
+        Memory_Resource* res = std::pmr::new_delete_resource();
 
-        run_typed_tests(&pool, &generator, random_runs, controlled_runs);
-        run_untyped_tests<u8>(&pool, &generator, random_runs, controlled_runs);
-        run_untyped_tests<u16>(&pool, &generator, random_runs, controlled_runs);
-        run_untyped_tests<u32>(&pool, &generator, random_runs, controlled_runs);
-        run_untyped_tests<u64>(&pool, &generator, random_runs, controlled_runs);
+        run_typed_tests(res, &generator, random_runs, controlled_runs);
+        run_untyped_tests<u8>(res, &generator, random_runs, controlled_runs);
+        run_untyped_tests<u16>(res, &generator, random_runs, controlled_runs);
+        run_untyped_tests<u32>(res, &generator, random_runs, controlled_runs);
+        run_untyped_tests<u64>(res, &generator, random_runs, controlled_runs);
     }
 }
