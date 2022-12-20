@@ -94,35 +94,31 @@ struct Slice
     func& operator[](size_t index) const noexcept { assert(index < size && "index out of range"); return data[index]; }
     func& operator[](size_t index) noexcept       { assert(index < size && "index out of range"); return data[index]; }
 
-    //bool constexpr operator ==(Slice const&) const noexcept = default;
     constexpr operator Slice<const T>() const noexcept { return Slice<const T>{this->data, this->size};}
 };
 
-//portion
 template <typename T>
-func slice(Slice<T> slice, size_t from, size_t count)
+func slice_size(Slice<T> slice, size_t from, size_t count)
 {
     assert(from <= slice.size && from + count <= slice.size && "sliced portion must be entirely within the given slice");
     return Slice<T>{slice.data + from, count};
 }
 
-//between
 template <typename T>
-func slice_to(Slice<T> slice, size_t from, size_t to)
+func slice_range(Slice<T> slice, size_t from, size_t to)
 {
     assert(to >= from);
-    return ::slice<T>(slice, from, to - from);
+    return ::slice_size<T>(slice, from, to - from);
 }
 
-//before - after ?
 template <typename T>
 func slice(Slice<T> slice, size_t from) -> Slice<T> {
-    return ::slice<T>(slice, from, slice.size - from);
+    return ::slice_size<T>(slice, from, slice.size - from);
 }
 
 template <typename T>
 func trim(Slice<T> slice, size_t to_size) -> Slice<T> {
-    return ::slice<T>(slice, 0, to_size);
+    return ::slice_size<T>(slice, 0, to_size);
 }
 
 template <typename T>
@@ -1834,7 +1830,7 @@ proc mul_karatsuba(Slice<T>* to, Slice<T>* aux, Slice<const T> left, Slice<const
     //we multyply into z3 and null the area between it and begginign of z1 
     // (ie the place where z2 will get added to)
     Slice<T> z3 = mul<T>(&z3_slot, &remaining_aux, x2, y2, optims, depth + 1);
-    Slice<T> z3_to_z1 = slice_to(trimmed_out, z3.size, z1_from_index);
+    Slice<T> z3_to_z1 = slice_range(trimmed_out, z3.size, z1_from_index);
     null_slice(&z3_to_z1);
 
     //we multiply into z1 and null the remaining size to the end of trimmed_out
@@ -1845,13 +1841,13 @@ proc mul_karatsuba(Slice<T>* to, Slice<T>* aux, Slice<const T> left, Slice<const
     null_slice(&z1_up);
 
     size_t used_to = 0;
-    Slice<T> z2_slot = slice(*aux, used_to, required_z2_size);
+    Slice<T> z2_slot = slice_size(*aux, used_to, required_z2_size);
     used_to += required_z2_size;
 
-    Slice<T> x_sum_slot = slice(*aux, used_to, required_add_x_sum_size);
+    Slice<T> x_sum_slot = slice_size(*aux, used_to, required_add_x_sum_size);
     used_to += required_add_x_sum_size;
 
-    Slice<T> y_sum_slot = slice(*aux, used_to, required_add_y_sum_size);
+    Slice<T> y_sum_slot = slice_size(*aux, used_to, required_add_y_sum_size);
     used_to += required_add_y_sum_size;
 
     Slice<T> x_sum = add<T>(&x_sum_slot, x1, x2);
@@ -2014,8 +2010,8 @@ proc pow_by_squaring(Slice<T>* to, Slice<T>* aux, Slice<const T> num, size_t pow
     
     Slice<T> after_out_aux = slice(*aux, required_size);
 
-    Slice<T> square_aux1 = slice(after_out_aux, required_sigle_aux*0, required_sigle_aux);
-    Slice<T> square_aux2 = slice(after_out_aux, required_sigle_aux*1, required_sigle_aux);
+    Slice<T> square_aux1 = slice_size(after_out_aux, required_sigle_aux*0, required_sigle_aux);
+    Slice<T> square_aux2 = slice_size(after_out_aux, required_sigle_aux*1, required_sigle_aux);
 
     Slice<T> remianing_aux = slice(after_out_aux, 2*required_sigle_aux);
 

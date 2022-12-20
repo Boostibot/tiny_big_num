@@ -35,9 +35,9 @@ using b64 = std::uint64_t;
 using f32 = float;
 using f64 = double;
 
-using byte = u8;
-using std::size_t;
 using cstring = const char*;
+using isize = i64;
+using usize = size_t;
 
 using std::move;
 
@@ -92,98 +92,15 @@ func div_round_up(T value, no_infer(T) to_multiple_of) -> auto
     return (value + to_multiple_of - 1) / to_multiple_of;
 }
 
-namespace Allocator_Actions
-{
-    template <typename T>
-    struct Result
-    {
-        bool action_exists = false;
-        T* ptr = nullptr;
-    };
-
-    enum class Action : u32 {};
-
-    constexpr Action DEALLOC_ALL = cast(Action) 1;
-    constexpr Action RESIZE = cast(Action) 2;
-}
-
-template <typename T>
-static constexpr size_t DEF_ALIGNMENT = max(
-    alignof(std::max_align_t), 
-    alignof(std::conditional_t<non_void<T>, T, byte>)
-);
-
-//STD allocator
-template <typename Alloc>   
-concept std_allocator = requires(Alloc alloc, size_t size)
-{
-    { alloc.allocate(size) } -> std::convertible_to<void*>;
-    alloc.deallocate(nullptr, size);
-
-    typename Alloc::value_type;
-};
-
-template <typename To, typename From>
-func maybe_unsafe_ptr_cast(From* from)
-{
-    if constexpr (std::convertible_to<From*, To*>)
-        return cast(To*) from;
-    else
-        return cast(To*) cast(void*) from;
-}
-
-template <typename T, std_allocator Alloc>
-proc allocate(Alloc* alloc, size_t size, size_t align) -> T* 
-{
-    using value_type = typename Alloc::value_type;
-    let recomputed_size = div_round_up(size * sizeof(T), sizeof(value_type));
-    return maybe_unsafe_ptr_cast<T>(alloc->allocate(size));
-}
-
-template <typename T, std_allocator Alloc>
-proc deallocate(Alloc* alloc, T* ptr, size_t size, size_t align) -> void 
-{
-    using value_type = typename Alloc::value_type;
-    let recomputed_size = div_round_up(size * sizeof(T), sizeof(value_type));
-    return alloc->deallocate(maybe_unsafe_ptr_cast<value_type>(ptr), recomputed_size);
-}
-
-template <typename T, std_allocator Alloc>
-proc action(Alloc* alloc, 
-    Allocator_Actions::Action action_type, 
-    void* old_ptr, 
-    size_t old_size, size_t new_size, 
-    size_t old_align, size_t new_align, 
-    void* custom_data = nullptr) -> Allocator_Actions::Result<T>
-{
-    return Allocator_Actions::Result<T>{false, nullptr};
-}
-
-template <typename Resource>
-concept allocator = true; 
-
-//template <typename Resource>
-//concept allocator = requires(Resource res, 
-//    Allocator_Actions::Action action_type, 
-//    void* old_ptr, 
-//    size_t old_size, size_t new_size, 
-//    size_t old_align, size_t new_align, 
-//    void* custom_data)
-//{
-//    //true; //@NOTE: MSVC is buggy and syntax highlighting breaks so we dont have all checks on per default
-//    //{ allocate<int>(&res, new_size, new_align) } -> std::convertible_to<int*>;
-//    //deallocate<void>(&res, old_ptr, old_size, old_align);
-//    //{ action<void>(&res, action_type, old_ptr, old_size, new_size, old_align, new_align, custom_data) } -> std::convertible_to<Allocator_Actions::Result<void>>;
-//};
-
 template<typename Container>
 concept direct_container = requires(Container container)
 {
     { container.data } -> std::convertible_to<void*>;
-    { container.size } -> std::convertible_to<size_t>;
+    { container.size } -> std::convertible_to<isize>;
     requires(!same<decltype(container.data), void*>);
 };
 
+#ifndef USE_CUSTOM_LIB
 namespace std 
 {
     func begin(direct_container auto& arr) noexcept {return arr.data;}
@@ -198,14 +115,4 @@ namespace std
     func size(const direct_container auto& arr) noexcept {return arr.size;}
     func data(const direct_container auto& arr) noexcept {return arr.data;}
 }
-
-
-template <typename T, size_t size_>
-struct Array
-{
-    static constexpr size_t size = size_;
-    T data[size > 0 ? size : 1];
-
-    func& operator[](size_t index) const noexcept { assert(index < size && "index out of range"); return data[index]; }
-    func& operator[](size_t index) noexcept       { assert(index < size && "index out of range"); return data[index]; }
-};
+#endif // USE_CUSTOM_LIB

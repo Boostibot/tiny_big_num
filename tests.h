@@ -11,90 +11,112 @@
 #include <array>
 #include <algorithm>
 
+#define USE_CUSTOM_LIB
+
+#ifdef USE_CUSTOM_LIB
+#include "jot/stack.h"
+#include "jot/allocator_arena.h"
+
+#undef move
+#undef forward
+
+#endif // USE_CUSTOM_LIB
+
 #include "benchmark.h"
 #include "big_int_ops.h"
 
+
 namespace test
 {
-    template <typename T>
-    using Vector = std::pmr::vector<T>;
-
-    template <typename T, size_t size>
-    using Array = std::array<T, size>;
-
-    template <typename T>
-    using Allocator = std::pmr::polymorphic_allocator<T>;
-
-    using Memory_Resource = std::pmr::memory_resource;
 
     using Unsigned_Max = u64;
+    using std::size;
+    using std::data;
+
+    #ifdef USE_CUSTOM_LIB
+        template <typename T>
+        using Vector = jot::Stack<T, 16>;
+
+        using Memory_Resource = jot::Allocator_Resource;
+
+        using Monotonic_Buffer_Resource = jot::Unbound_Arena_Resource;
+
+        template<typename T>
+        func make_sized_vector(size_t size, Memory_Resource* resource) -> Vector<T>
+        {
+            using namespace jot;
+            Vector<T> vec = Poly_Allocator{std::move(resource)};
+            if(size != 0)
+                force(resize(&vec, cast(isize) size));
+            return vec;
+        }
+
+        runtime_proc release_memory(Monotonic_Buffer_Resource* resource) noexcept -> void 
+        {
+            resource->deallocate_all();
+        }
+
+        template<typename T>
+        func push_back(Vector<T>* vec, T pushed)
+        {
+            using namespace jot;
+            force(push(vec, move(pushed)));
+        }
+
+        template<typename T>
+        func resize(Vector<T>* vec, size_t size) -> void
+        {
+            jot::force(jot::resize(vec, size));
+        }
+
+    #else
+        template <typename T>
+        using Vector = std::pmr::vector<T>;
+
+        using Memory_Resource = std::pmr::memory_resource;
+
+        using Monotonic_Buffer_Resource = std::pmr::monotonic_buffer_resource;
+
+        template<typename T>
+        func make_sized_vector(size_t size, Memory_Resource* resource) -> Vector<T>
+        {
+            Vector<T> vec(std::move(resource));
+            if(size != 0)
+                vec.resize(size);
+            return vec;
+        }
 
 
-    #if 0
-    template <typename T, size_t capacity>
-    struct Static_Vector
-    {
-        size_t _size = {};
-        Array<T, capacity> storage = {};
+        runtime_proc release_memory(Monotonic_Buffer_Resource* resource) noexcept -> void
+        {
+            resource->release();
+        }
 
-        func size() const -> size_t { return _size; }
-        func size() -> size_t& { return _size; }
+        template<typename T>
+        func push_back(Vector<T>* vec, T pushed)
+        {
+            vec->push_back(move(pushed));
+        }
 
-        func capacity() const -> size_t { return storage.size(); }
-
-        func data() const -> const T* {return storage.data(); }
-        func data() -> T* {return storage.data(); }
-
-        func& operator[](size_t index) const noexcept { assert(index < _size && "index out of range"); return storage[index]; }
-        func& operator[](size_t index) noexcept       { assert(index < _size && "index out of range"); return storage[index]; }
-
-        //bool constexpr operator ==(Slice const&) const noexcept = default;
-        //constexpr operator Slice<T>() noexcept             { return Slice<T>{this->data, this->size};}
-        constexpr operator Slice<const T>() const noexcept { return Slice<const T>{this->data(), this->size()};}
-    };
-
-    template<typename T, size_t capacity>
-    func make_sized_static_vector(size_t size = capacity) -> Static_Vector<T, capacity>
-    {
-        Static_Vector<T, capacity> vec;
-        vec._size = size;
-        return vec;
-    }
-
-    template<typename T, size_t cap>
-    func to_slice(Static_Vector<T, cap> const& vec) -> Slice<const T>
-    {
-        return Slice<const T>{vec.data(), vec.size()};
-    }
-    template<typename T, size_t cap>
-    func to_slice(Static_Vector<T, cap>* vec) -> Slice<T>
-    {
-        return Slice<T>{vec->data(), vec->size()};
-    }
+        template<typename T>
+        func resize(Vector<T>* vec, size_t size)
+        {
+            vec->resize(size);
+        }
     #endif
-
-
-    template<typename T>
-    func make_sized_vector(size_t size, Memory_Resource* resource) -> Vector<T>
-    {
-        Vector<T> vec(std::move(resource));
-        if(size != 0)
-            vec.resize(size);
-        return vec;
-    }
 
     template<typename T>
     func to_slice(Vector<T> const& vec) -> Slice<const T>
     {
-        return Slice<const T>{vec.data(), vec.size()};
+        return Slice<const T>{data(vec), cast(usize) size(vec)};
     }
-
 
     template<typename T>
     func to_slice(Vector<T>* vec) -> Slice<T>
     {
-        return Slice<T>{vec->data(), vec->size()};
+        return Slice<T>{std::data(*vec), cast(usize) size(*vec)};
     }
+
 
 
     template<typename T>
@@ -114,7 +136,7 @@ namespace test
         Vector<T> vec = make_sized_vector<T>(count, resource);
         Slice<T> slice = to_slice(&vec);
         Slice<T> converted_slice = from_number<T>(&slice, val);
-        vec.resize(converted_slice.size);
+        resize(&vec, converted_slice.size);
         return vec;
     }
 
@@ -137,7 +159,7 @@ namespace test
 
         padded.vector = make_sized_vector<T>(total_size, resource);
         Slice<T> whole = to_slice(&padded.vector);
-        Slice<T> digits = slice(whole, pref_size, count);
+        Slice<T> digits = slice_size(whole, pref_size, count);
         Slice<T> content = from_number<T>(&digits, val);
 
         padded.prefix_size = pref_size;
@@ -151,14 +173,14 @@ namespace test
     func content(Padded_Vector<T>* padded) -> Slice<T>
     {
         Slice<T> whole = to_slice(&padded->vector);
-        return slice(whole, padded->prefix_size, padded->content_size);
+        return slice_size(whole, padded->prefix_size, padded->content_size);
     }
 
     template <typename T>
     func content(Padded_Vector<T> const& padded) -> Slice<const T>
     {
         Slice<const T> whole = to_slice(padded.vector);
-        return slice(whole, padded.prefix_size, padded.content_size);
+        return slice_size(whole, padded.prefix_size, padded.content_size);
     }
 
     using Random_Generator = std::mt19937;
@@ -662,8 +684,8 @@ namespace test
         using CSlice = Slice<const T>;
         using Slice = Slice<T>;
 
-        std::pmr::monotonic_buffer_resource local_buffer{upstream};
-        Memory_Resource* resource = upstream;
+        Monotonic_Buffer_Resource local_buffer{upstream};
+        Memory_Resource* resource = &local_buffer;
         
         runtime_proc test_add_overflow_batch = [&](Max left_, Max right_, Max carry_in, Res expected, bool check_overflow = true) -> bool {
             Vector left = make_vector_of_digits<T>(left_, resource);
@@ -776,7 +798,8 @@ namespace test
 
             assert(test_add_overflow_batch(0x1225, 0xEFEF, 0, Res{0x0214, 1}));
 
-            local_buffer.release();
+
+            release_memory(&local_buffer);
         }
 
         assert(auto_test_add(0xFF, 0xFF));
@@ -795,7 +818,7 @@ namespace test
         for(size_t i = 0; i < random_runs; i++)
         {
             if(i % RELEASE_MEMORY_EVERY == 0)
-                local_buffer.release();
+                release_memory(&local_buffer);
 
             Max left = distribution(*generator);
             Max right = distribution(*generator);
@@ -816,8 +839,8 @@ namespace test
         using CSlice = Slice<const T>;
         using Slice = Slice<T>;
 
-        std::pmr::monotonic_buffer_resource local_buffer{upstream};
-        Memory_Resource* resource = upstream;
+        Monotonic_Buffer_Resource local_buffer{upstream};
+        Memory_Resource* resource = &local_buffer;
 
         runtime_proc test_sub_overflow_batch = [&](Max left_, Max right_, Max carry_in, Res expected, bool check_overflow = true) -> bool {
             Vector left = make_vector_of_digits<T>(left_, resource);
@@ -890,7 +913,7 @@ namespace test
             assert(test_sub_overflow_batch(0x1, 0xFFFFFFFF, 0, Res{0x2, 1}));
             assert(test_sub_overflow_batch(0xFFFFFFFF, 0x1, 0, Res{0xFFFFFFFE, 0}));
 
-            local_buffer.release();
+            release_memory(&local_buffer);
         }
 
         assert(auto_test_sub(0xFF, 0xFF));
@@ -907,7 +930,7 @@ namespace test
         for(size_t i = 0; i < random_runs; i++)
         {
             if(i % RELEASE_MEMORY_EVERY == 0)
-                local_buffer.release();
+                release_memory(&local_buffer);
 
             Max left = distribution(*generator);
             Max right = distribution(*generator);
@@ -926,8 +949,8 @@ namespace test
         using CSlice = Slice<const T>;
         using Slice = Slice<T>;
 
-        std::pmr::monotonic_buffer_resource local_buffer{upstream};
-        Memory_Resource* resource = upstream;
+        Monotonic_Buffer_Resource local_buffer{upstream};
+        Memory_Resource* resource = &local_buffer;
 
         //we dont test oveflow of this op 
         runtime_proc complement_overflow_batch = [&](Max left_, Max carry_in = 1) -> Max{
@@ -992,7 +1015,7 @@ namespace test
         for(size_t i = 0; i < random_runs; i++)
         {
             if(i % RELEASE_MEMORY_EVERY == 0)
-                local_buffer.release();
+                release_memory(&local_buffer);
 
             Max left = exponential(*generator);
             Max carry = uniform(*generator);
@@ -1010,8 +1033,8 @@ namespace test
         using CSlice = Slice<const T>;
         using Slice = Slice<T>;
 
-        std::pmr::monotonic_buffer_resource local_buffer{upstream};
-        Memory_Resource* resource = upstream;
+        Monotonic_Buffer_Resource local_buffer{upstream};
+        Memory_Resource* resource = &local_buffer;
 
         runtime_proc shift_both = [&](Max left_, Max right, Max carry_in, bool up_down, Iter_Direction direction) -> Batch_Op_Result{
             Padded pad_left = make_padded_vector_of_digits<T>(left_, resource, 1);
@@ -1089,7 +1112,7 @@ namespace test
             assert((shift_up_overflow_batch(0b0101'0101'0111'0001, 0) == Res{0b0101'0101'0111'0001, 0}));
             assert((shift_up_overflow_batch(0b0101'0101'0111'0001, 7, 0b11001100) == Res{0b1011'1000'1110'0110, 0b010'1010}));
 
-            local_buffer.release();
+            release_memory(&local_buffer);
 
             assert((shift_down_overflow_batch(0, 0, 0) == Res{0, 0}));
             assert((shift_down_overflow_batch(0, 1, 0) == Res{0, 0}));
@@ -1108,7 +1131,7 @@ namespace test
             assert((shift_down_overflow_batch(0b0101010101110001, 5) == Res{0b0000001010101011, 0b10001000}));
             assert((shift_down_overflow_batch(0b0101010101110001, 5, 0b1010'1111) == Res{0b0111101010101011, 0b10001000}));
 
-            local_buffer.release();
+            release_memory(&local_buffer);
         }
     }
 
@@ -1157,8 +1180,8 @@ namespace test
         using CSlice = Slice<const T>;
         using Slice = Slice<T>;
 
-        std::pmr::monotonic_buffer_resource local_buffer{upstream};
-        Memory_Resource* resource = upstream;
+        Monotonic_Buffer_Resource local_buffer{upstream};
+        Memory_Resource* resource = &local_buffer;
 
         runtime_proc test_mul_overflow_batch = [&](Max left_, Max right, Max carry_in, Res expected, Optim_Info optims, bool check_overflow = true) -> bool {
             Padded pad_left = make_padded_vector_of_digits<T>(left_, resource, 1);
@@ -1230,7 +1253,7 @@ namespace test
                 assert(test_mul_overflow_batch(13745, 137, 0, Res{0xBBB9, 0x1C}, optims));
 
 
-                local_buffer.release();
+                release_memory(&local_buffer);
             }
         }
 
@@ -1241,7 +1264,7 @@ namespace test
         for(size_t i = 0; i < random_runs; i++)
         {
             if(i % RELEASE_MEMORY_EVERY == 0)
-                local_buffer.release();
+                release_memory(&local_buffer);
 
             Max left = exponential(*generator);
             Max right = uniform(*generator);
@@ -1262,8 +1285,8 @@ namespace test
 
         assert((div_overflow_low<T>(0x12, 0x0A, 0) == Overflow<T>{1, 0x08}));
 
-        std::pmr::monotonic_buffer_resource local_buffer{upstream};
-        Memory_Resource* resource = upstream;
+        Monotonic_Buffer_Resource local_buffer{upstream};
+        Memory_Resource* resource = &local_buffer;
 
         runtime_proc test_div_overflow_low_batch = [&](Max left_, Max right, Max carry_in, Res expected, Optim_Info optims) -> bool {
             constexpr size_t padding_before = 2;
@@ -1335,7 +1358,7 @@ namespace test
                 assert(test_div_overflow_low_batch(0xABCDEF00, 0x0F, 0, Res{192160000, 0}, optims));
                 assert(test_div_overflow_low_batch(13745, 0xB, 0, Res{1249, 6}, optims));
 
-                local_buffer.release();
+                release_memory(&local_buffer);
             }
         }
 
@@ -1344,7 +1367,7 @@ namespace test
         for(size_t i = 0; i < random_runs; i++)
         {
             if(i % RELEASE_MEMORY_EVERY == 0)
-                local_buffer.release();
+                release_memory(&local_buffer);
 
             Max left = exponential(*generator);
             Max right = uniform(*generator);
@@ -1363,13 +1386,13 @@ namespace test
         using CSlice = Slice<const T>;
         using Slice = Slice<T>;
 
-        std::pmr::monotonic_buffer_resource local_buffer{upstream};
-        Memory_Resource* resource = upstream;
+        Monotonic_Buffer_Resource local_buffer{upstream};
+        Memory_Resource* resource = &local_buffer;
 
         runtime_proc test_fused_mul_add = [&](Max left_, Max right_, Max coef, Max expected, Optim_Info optims = Optim_Info{}) -> bool{
             Vector left = make_vector_of_digits<T>(left_, resource);
             Vector right = make_vector_of_digits<T>(right_, resource);
-            Vector output = make_sized_vector<T>(left.size(), resource);
+            Vector output = make_sized_vector<T>(size(left), resource);
 
             Slice left_s = to_slice(&left);
             Slice right_s = to_slice(&right);
@@ -1378,8 +1401,8 @@ namespace test
             let res_out = ::fused_mul_add_overflow_batch<T>(&output_s, left_s, right_s, cast(T) coef, optims, Op_Location::OUT_OF_PLACE);
             let res_in = ::fused_mul_add_overflow_batch<T>(&left_s, left_s, right_s, cast(T) coef, optims, Op_Location::IN_PLACE);
         
-            output.push_back(res_out.overflow);
-            left.push_back(res_in.overflow);
+            push_back(&output, res_out.overflow);
+            push_back(&left, res_in.overflow);
 
             left_s = to_slice(&left);
             output_s = to_slice(&output);
@@ -1398,9 +1421,9 @@ namespace test
             Vector left = make_vector_of_digits<T>(left_, resource);
             Vector right = make_vector_of_digits<T>(right_, resource);
 
-            size_t to_size = required_mul_to_size(left.size(), right.size());
-            size_t aux_size1 = required_mul_quadratic_auxiliary_size(left.size(), right.size());
-            size_t aux_size2 = required_mul_karatsuba_auxiliary_size(left.size(), right.size());
+            size_t to_size = required_mul_to_size(size(left), size(right));
+            size_t aux_size1 = required_mul_quadratic_auxiliary_size(size(left), size(right));
+            size_t aux_size2 = required_mul_karatsuba_auxiliary_size(size(left), size(right));
 
             size_t aux_size = max(aux_size1, aux_size2)*10; //to allow all karatsuba recursions
 
@@ -1440,7 +1463,6 @@ namespace test
         assert(auto_test_fused_mul_add(0xFFFF, 1, 0x80, shift));
         assert(auto_test_fused_mul_add(0x1000000000, 0x574ce80, 0x10, shift));
         assert(auto_test_fused_mul_add(0x0da8824af2592c00, 0x0da8824af2592c00, 0x2, shift));
-        local_buffer.release();
 
         assert(test_mul_quadratic(0, 0, 0));
         assert(test_mul_quadratic(1, 0, 0));
@@ -1461,7 +1483,7 @@ namespace test
         assert(test_mul_quadratic(0xABCD, 0x1254, 0xABCD*0x1254));
         assert(test_mul_quadratic(0xABCDEF124, 0x1254, 0xC4CDA61BA7D0));
         assert(test_mul_quadratic(0x1254, 0xABCDEF124, 0xC4CDA61BA7D0));
-        local_buffer.release();
+        release_memory(&local_buffer);
 
         assert(auto_test_mul_quadratic(0x1d15a574ce80, 0x38, shift));
         assert(auto_test_mul_quadratic(0x1d15a574ce80, 0xFFFF, shift));
@@ -1474,7 +1496,7 @@ namespace test
         for(size_t i = 0; i < random_runs; i++)
         {
             if(i % RELEASE_MEMORY_EVERY == 0)
-                local_buffer.release();
+                release_memory(&local_buffer);
 
             Optim_Info optims = generate_random_optims(generator);
             Max left = distribution(*generator);
@@ -1500,14 +1522,14 @@ namespace test
             OKAY
         };
 
-        std::pmr::monotonic_buffer_resource local_buffer{upstream};
-        Memory_Resource* resource = upstream;
+        Monotonic_Buffer_Resource local_buffer{upstream};
+        Memory_Resource* resource = &local_buffer;
 
         runtime_proc test_div_bit_by_bit = [&](Max num_, Max den_, Max ex_quotient, Max ex_remainder, Will_Fail expected_fail = OKAY, Optim_Info optims = Optim_Info{}) -> bool{
             Vector num = make_vector_of_digits<T>(num_, resource); 
             Vector den = make_vector_of_digits<T>(den_, resource);
-            size_t quo_size = required_div_quotient_size(num.size(), den.size());
-            size_t rem_size = required_div_remainder_size(num.size(), den.size());
+            size_t quo_size = required_div_quotient_size(size(num), size(den));
+            size_t rem_size = required_div_remainder_size(size(num), size(den));
 
             Vector quo = make_sized_vector<T>(quo_size, resource); 
             Vector rem = make_sized_vector<T>(rem_size, resource);
@@ -1554,7 +1576,7 @@ namespace test
         assert(test_div_bit_by_bit(0xABCDEF00, 0, 0, 0, FAIL));
         assert(test_div_bit_by_bit(0xAB, 0xABCD, 0, 0xAB));
         assert(test_div_bit_by_bit(0xABCE, 0xABCD, 1, 1));
-        local_buffer.release();
+        release_memory(&local_buffer);
 
         assert(auto_test_div_bit_by_bit(13745, 6435));
         assert(auto_test_div_bit_by_bit(4643477, 4796));
@@ -1570,7 +1592,7 @@ namespace test
         for(size_t i = 0; i < random_runs; i++)
         {
             if(i % RELEASE_MEMORY_EVERY == 0)
-                local_buffer.release();
+                release_memory(&local_buffer);
 
             Optim_Info optims = generate_random_optims(generator);
             Unsigned_Max left = distribution(*generator);
@@ -1604,7 +1626,7 @@ namespace test
         Slice<Rep> converted = (to_base<Num, Rep>(&out_s, &temp_s, num, base, conv, optims));
         assert(is_striped_representation(converted));
 
-        out.resize(converted.size);
+        resize(&out, converted.size);
         return out;
     };
 
@@ -1617,7 +1639,7 @@ namespace test
         Slice<Num> converted = from_base<Num, Rep>(&out_s, rep, base, conv, optims);
 
         assert(is_striped_number(converted));
-        out.resize(converted.size);
+        resize(&out, converted.size);
         return out;
     };
 
@@ -1768,7 +1790,7 @@ namespace test
             converted[size] = cast(Rep) rem;
         }
 
-        converted.resize(size);
+        resize(&converted, size);
         Slice<Rep> converted_s = to_slice(&converted);
         reverse(&converted_s);
 
@@ -1801,8 +1823,8 @@ namespace test
         static_assert(sizeof(Num) >= sizeof(Rep));
         using Max = Unsigned_Max;
 
-        std::pmr::monotonic_buffer_resource local_buffer{upstream};
-        Memory_Resource* resource = upstream;
+        Monotonic_Buffer_Resource local_buffer{upstream};
+        Memory_Resource* resource = &local_buffer;
 
         proc id_to_conversion = [](Num num) -> Rep {return cast(Rep) num;};
         proc id_from_conversion = [](Rep num) -> Num {return cast(Num) num;};
@@ -1878,7 +1900,7 @@ namespace test
         assert((manual_test_to_base(65453, 9, {1,0,8,7,0,5})));
         assert((manual_test_to_base(844354, 9, {1,5,2,6,2,1,1})));
         assert((manual_test_to_base(844354, 10, {8,4,4,3,5,4})));
-        local_buffer.release();
+        release_memory(&local_buffer);
 
         assert((manual_test_from_base({1}, 2, 1)));
         assert((manual_test_from_base({1,0}, 2, 2)));
@@ -1905,7 +1927,7 @@ namespace test
         for(size_t i = 0; i < random_runs; i++)
         {
             if(i % RELEASE_MEMORY_EVERY == 0)
-                local_buffer.release();
+                release_memory(&local_buffer);
 
             Optim_Info optims = generate_random_optims(generator);
             Unsigned_Max num = num_dist(*generator);
@@ -1926,8 +1948,8 @@ namespace test
         using CSlice = Slice<const T>;
         using Slice = Slice<T>;
 
-        std::pmr::monotonic_buffer_resource local_buffer{upstream};
-        Memory_Resource* resource = upstream;
+        Monotonic_Buffer_Resource local_buffer{upstream};
+        Memory_Resource* resource = &local_buffer;
 
         runtime_proc pow_ = [&](CSlice num, size_t pow, Optim_Info optims, bool do_trivial) -> Vector {
             size_t required_size = required_pow_to_size(num, pow);
@@ -1944,7 +1966,7 @@ namespace test
             else
                 powed = ::pow_by_squaring<T>(&out_s, &aux_s, num, pow, optims);
 
-            out.resize(powed.size);
+            resize(&out, powed.size);
             return out;
         };
 
@@ -1987,7 +2009,7 @@ namespace test
         assert(trivial_pow(5465, 3) == 5465ull*5465ull*5465ull);
         assert(trivial_pow(2, 10) == 1024);
         assert(trivial_pow(2, 20) == 1048576);
-        local_buffer.release();
+        release_memory(&local_buffer);
 
         assert(pow_by_squaring(0, 0) == 1);
         assert(pow_by_squaring(0, 1) == 0);
@@ -2045,17 +2067,29 @@ namespace test
         const u32 seed = os_seed();
 
         Random_Generator generator(seed);
-        const size_t random_runs = 1000;
-        const size_t controlled_runs = 50;
+        const size_t random_runs = 10000;
+        const size_t controlled_runs = 500;
 
-        //std::pmr::unsynchronized_pool_resource pool;
-        //Memory_Resource* res = &pool;
-        Memory_Resource* res = std::pmr::new_delete_resource();
+        //Without: 3592801800
+        //With:    3108090100
+        for(int i = 0; i < 10; i++)
+        {
+            std::cout << "ellapsed: " << ellapsed_time([&](){
+                //std::pmr::unsynchronized_pool_resource pool;
+                //Memory_Resource* res = &pool;
 
-        run_typed_tests(res, &generator, random_runs, controlled_runs);
-        run_untyped_tests<u8>(res, &generator, random_runs, controlled_runs);
-        run_untyped_tests<u16>(res, &generator, random_runs, controlled_runs);
-        run_untyped_tests<u32>(res, &generator, random_runs, controlled_runs);
-        run_untyped_tests<u64>(res, &generator, random_runs, controlled_runs);
+                #ifdef USE_CUSTOM_LIB
+                //jot::Unbound_Arena_Resource arena;
+                Memory_Resource* res = jot::new_delete_resource();
+                #else
+                Memory_Resource* res = std::pmr::new_delete_resource();
+                #endif
+                run_typed_tests(res, &generator, random_runs, controlled_runs);
+                run_untyped_tests<u8>(res, &generator, random_runs, controlled_runs);
+                run_untyped_tests<u16>(res, &generator, random_runs, controlled_runs);
+                run_untyped_tests<u32>(res, &generator, random_runs, controlled_runs);
+                run_untyped_tests<u64>(res, &generator, random_runs, controlled_runs);
+            }) << " ms" << std::endl;
+        }
     }
 }

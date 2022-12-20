@@ -148,6 +148,7 @@
   <ItemGroup>
     <ClInclude Include="benchmark.h" />
     <ClInclude Include="big_int_ops.h" />
+    <ClInclude Include="jot\allocator_arena.h" />
     <ClInclude Include="preface.h" />
     <ClInclude Include="tests.h" />
     <ClInclude Include="unrelated.h" />
