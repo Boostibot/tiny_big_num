@@ -11,7 +11,7 @@
 #include <array>
 #include <algorithm>
 
-#define USE_CUSTOM_LIB
+//#define USE_CUSTOM_LIB
 
 #ifdef USE_CUSTOM_LIB
 #include "jot/stack.h"

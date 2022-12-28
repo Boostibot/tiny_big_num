@@ -147,23 +147,23 @@ func gather_samples(
 
 //the most trivial version of benchmark without any sample discarting - only counts skipping warm_up_ms ms
 template <thunk Fn>
-func count_iters(detail::u64 time_ms, Fn fn, detail::u64 warm_up_ms = time / 10, detail::u64 base_block_size = 1, detail::u64 num_checks = 5) -> detail::u64
+func count_iters(detail::u64 time_ms, detail::u64 warm_up_ms, Fn fn, detail::u64 base_block_size = 1, detail::u64 num_checks = 5) -> detail::u64
 {
     using namespace detail;
 
-    ms time = time_ms;
-    ms warm_up = warm_up_ms;
+    ms time = ms(time_ms);
+    ms warm_up = ms(warm_up_ms);
 
     u64 iters = 0;
     u64 block_size = base_block_size;
     
     Benchmark_Stage stage = Benchmark_Stage::Initial;
     time_point start = detail::clock();
-    time_point to_time = warm_up;
+    time_point to_time = time_point(warm_up);
     if(warm_up == ms(0))
     {
         stage = Benchmark_Stage::Blocked;
-        to_time = time;
+        to_time = time_point(time);
     }
 
     while(true)
