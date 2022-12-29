@@ -269,7 +269,6 @@ namespace xigoi2
             //Integer middle;
             //Integer diff;
             while(true) 
-            //do
             {
                 //middle = (low + high).half();
                 naf::add_or_sub(&temp.digits, &carry.digits, low.digits, high.digits, true);
@@ -284,38 +283,12 @@ namespace xigoi2
                    return make_pair(std::move(middle), std::move(diff));
 
                 } else if (diff.is_positive()) {
-                    std::swap(high, old_high);
                     high = middle;
-
-                    //Digit high_old_high_compared = naf::compare(&temp.digits, &carry.digits, high.digits, old_high.digits);
-                    //if(high_old_high_compared == 0)
-                    //    break;
-
-                    if(naf::are_equal(high.digits, old_high.digits))
-                        break;
                 } else {
-
-                    std::swap(low, old_low);
-                    //low = middle + 1;
                     naf::add_or_sub(&low.digits, &carry.digits, middle.digits, one.digits, true);
-
-                    //Digit low_old_low_compared = naf::compare(&temp.digits, &carry.digits, low.digits, old_low.digits);
-                    //if(low_old_low_compared == 0)
-                    //    break;
-
-                    if(naf::are_equal(low.digits, old_low.digits))
-                        break;
                 }
-
-                //@TEMP
-                //Digit low_high_compared = naf::compare(&temp.digits, &carry.digits, low.digits, high.digits);
-                //if(low_high_compared == 0)
-                    //break;
-
-                if(naf::are_equal(low.digits, high.digits))
-                    break;
             } 
-            //while (low != high);
+            while (naf::are_equal(low.digits, high.digits) == false);
 
 
             naf::incr_or_decr(&carry.digits, &low.digits, one.digits, false);

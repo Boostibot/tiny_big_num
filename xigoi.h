@@ -87,9 +87,9 @@ namespace xigoi
                 [](Digit x, Digit y) { return x + y; });
             Digits carry(length);
             
-            /*
+            
             auto indices = iota_view(Size(0), length);
-            for_each(parallel, indices.begin(), indices.end(), [&](Size index) {
+            for_each(indices.begin(), indices.end(), [&](Size index) {
                 if (digits[index] >= max_digit) {
                     carry[index] = 1;
                     digits[index] -= base;
@@ -100,11 +100,9 @@ namespace xigoi
                     carry[index] = 0;
                 }
             });
-            */
 
-            //@BUG - doesnt ever do anything
-            //transform(parallel, carry.begin(), carry.end(), digits.begin() + 1,
-                //digits.begin() + 1, [](Digit x, Digit y) { return x + y; });
+            transform(parallel, carry.begin(), carry.end(), digits.begin() + 1,
+                digits.begin() + 1, [](Digit x, Digit y) { return x + y; });
 
                 while (digits.empty() == false && digits.back() == 0) {
                     digits.pop_back();
@@ -261,19 +259,9 @@ namespace xigoi
                 if (diff.is_zero()) {
                     return middle;
                 } else if (diff.is_positive()) {
-                    std::swap(high, old_high);
                     high = middle;
-
-                    //@BUG - infinite loop prevention here
-                    if(high == old_high)
-                        break;
                 } else {
-                    std::swap(low, old_low);
                     low = middle + 1;
-
-                    //@BUG - infinite loop prevention here
-                    if(low == old_low)
-                        break;
                 }
             } 
             while (high != low);

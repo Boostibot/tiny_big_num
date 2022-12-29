@@ -268,16 +268,28 @@ namespace naf
         //left->resize(max_size + 1);
         left->resize(max_size);
 
-
         std::transform(parallel, left->begin(), left->begin() + right.size(),
             right.begin(), left->begin(), op_binary);
 
-        //@BUG: ?????
-        //carry->clear();
-        //carry->resize(max_size);
-        //std::transform(parallel, 
-            //left->begin() + 1, left->begin() + 1 + carry->size(), 
-            //carry->begin(), left->begin() + 1, op_binary);
+        carry->clear();
+        carry->resize(max_size);
+
+        auto indices = iota_view(Size(0), max_size);
+        std::for_each(indices.begin(), indices.end(), [&](Size index) {
+            if ((*left)[index] >= max_digit) {
+                (*carry)[index] = 1;
+                (*left)[index] -= base;
+            } else if ((*left)[index] <= -max_digit) {
+                (*carry)[index] = -1;
+                (*left)[index] += base;
+            } else {
+                (*carry)[index] = 0;
+            }
+        });
+
+        std::transform(parallel, 
+            left->begin() + 1, left->begin() + 1 + carry->size(), 
+            carry->begin(), left->begin() + 1, op_binary);
 
         Size non_zero = find_first_non_zero(*left);
         if(non_zero + 1 < left->size())
@@ -286,6 +298,10 @@ namespace naf
 
     static void add_or_sub(Digits* restrict output, Digits* restrict carry, Digits const& restrict left, Digits const& restrict right, bool is_addition)
     {
+        *output = left;
+        incr_or_decr(carry, output, right, is_addition);
+        return;
+
         const auto op_binary = is_addition ? ops::add : ops::sub;
         const auto op_unary = is_addition ? ops::add_zero : ops::sub_zero;
 
@@ -314,12 +330,24 @@ namespace naf
                 output->begin() + min_size, op_unary);
         }
 
-        //@BUG: ?????
         //carry->clear();
         //carry->resize(max_size);
+        //auto indices = iota_view(Size(0), max_size);
+        //std::for_each(indices.begin(), indices.end(), [&](Size index) {
+        //    if ((*output)[index] >= max_digit) {
+        //        (*carry)[index] = 1;
+        //        (*output)[index] -= base;
+        //    } else if ((*output)[index] <= -max_digit) {
+        //        (*carry)[index] = -1;
+        //        (*output)[index] += base;
+        //    } else {
+        //        (*carry)[index] = 0;
+        //    }
+        //});
+
         //std::transform(parallel, 
-            //output->begin() + 1, output->begin() + 1 + carry->size(), 
-            //carry->begin(), output->begin() + 1, op_binary);
+        //    output->begin() + 1, output->begin() + 1 + carry->size(), 
+        //    carry->begin(), output->begin() + 1, op_binary);
 
         Size non_zero = find_first_non_zero(*output);
         if(non_zero + 1 < output->size())
