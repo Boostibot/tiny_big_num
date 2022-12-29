@@ -108,6 +108,10 @@ namespace naf
             return _data[0];
         }
 
+        constexpr auto empty() const noexcept -> bool{
+            return _size == 0;
+        }
+
         constexpr void swap(Vector& other) noexcept
         {
             std::swap(this->_data, other._data);
@@ -125,13 +129,17 @@ namespace naf
             swap(other);
         }
 
-
         constexpr Vector(Vector const& other)
         {
             if(other._size == 0)
                 return;
 
             _copy_other_with_capacity(other, other._size);
+        }
+
+        constexpr Vector(size_t size)
+        {
+            resize(size);
         }
 
         constexpr Vector& operator=(Vector&& other) noexcept
@@ -199,7 +207,7 @@ namespace naf
 
         constexpr void push_back(T what)
         {
-            reserve(this->_capacity + 1);
+            reserve(this->_size + 1);
             this->_data[this->_size] = what;
             this->_size ++;
         }
@@ -215,12 +223,83 @@ namespace naf
             this->_size --;
         }
     };
+
+    struct Iota_Iterator
+    {
+        using Type = ptrdiff_t;
+
+        using iterator_category = std::random_access_iterator_tag;
+        using value_type      = Type;
+        using difference_type = ptrdiff_t;
+        using pointer         = value_type*;
+        using reference       = value_type&;
+
+        using Iterator = Iota_Iterator;
+
+        constexpr Iota_Iterator() : value(0) {}
+        constexpr Iota_Iterator(Type value) : value(value) {}
+        constexpr Iota_Iterator(const Iterator &rhs) : value(rhs.value) {}
+
+        constexpr inline Iterator& operator+=(difference_type rhs) {value += rhs; return *this;}
+        constexpr inline Iterator& operator-=(difference_type rhs) {value -= rhs; return *this;}
+
+        constexpr inline Type operator*() const                     {return value;}
+        constexpr inline Type operator[](difference_type rhs) const {return value + rhs;}
+
+        constexpr inline Iterator& operator++() {++value; return *this;}
+        constexpr inline Iterator& operator--() {--value; return *this;}
+        constexpr inline Iterator operator++(int) {Iterator tmp(*this); ++value; return tmp;}
+        constexpr inline Iterator operator--(int) {Iterator tmp(*this); --value; return tmp;}
+        constexpr inline difference_type operator-(const Iterator& rhs) const {return value-rhs.value;}
+        constexpr inline Iterator operator+(difference_type rhs) const {return Iterator(value+rhs);}
+        constexpr inline Iterator operator-(difference_type rhs) const {return Iterator(value-rhs);}
+
+        friend constexpr inline Iterator operator+(difference_type lhs, const Iterator& rhs) {
+            return Iterator(lhs + rhs.value);
+        }
+
+        constexpr inline bool operator==(const Iterator& rhs) const {return value == rhs.value;}
+        constexpr inline bool operator!=(const Iterator& rhs) const {return value != rhs.value;}
+        constexpr inline bool operator>(const Iterator& rhs) const {return value > rhs.value;}
+        constexpr inline bool operator<(const Iterator& rhs) const {return value < rhs.value;}
+        constexpr inline bool operator>=(const Iterator& rhs) const {return value >= rhs.value;}
+        constexpr inline bool operator<=(const Iterator& rhs) const {return value <= rhs.value;}
+
+        Type value = 0;
+    };
+
+    struct Iota_View
+    {
+        using Type = std::int64_t;
+        using value_type      = Type;
+        using size_type       = size_t;
+        using difference_type = ptrdiff_t;
+        using pointer         = Type*;
+        using const_pointer   = const Type*;
+        using reference       = Type&;
+        using const_reference = const Type&;
+
+        using iterator       = Iota_Iterator;
+        using const_iterator = Iota_Iterator;
+
+        Type from;
+        Type to;
+
+        constexpr auto begin() const noexcept -> const_iterator {
+            return this->from;
+        }
+
+        constexpr auto end() const noexcept -> const_iterator {
+            return this->to;
+        }
+    };
+
+    static_assert(std::forward_iterator<Iota_Iterator>, "!");
+    static_assert(std::input_iterator<Iota_Iterator>, "!");
+    static_assert(std::random_access_iterator<Iota_Iterator>, "!");
 }
 namespace naf
 {
-    using std::ranges::iota_view;
-    using std::views::reverse;
-
     using Digit = std::int64_t;
     using Digits = Vector<Digit>;
     using Size = std::size_t;
@@ -244,9 +323,9 @@ namespace naf
         static Digit sub_zero(Digit y) { return 0 - y; };
     }
 
+    #if 1
     static Size find_first_non_zero(Digits const& digits) noexcept
     {
-        //@TODO make paralel here
         Size i = digits.size();
         for(; i-- > 0;)
             if(digits[i] != 0)
@@ -254,7 +333,31 @@ namespace naf
 
         return i;
     }
+    #else
+    static Size find_first_non_zero(Digits const& digits) noexcept
+    {
+        Iota_View indices = Iota_View(Size(0), digits.size());
+        size_t index = std::transform_reduce(parallel, indices.begin(), indices.end(), digits.begin(), (size_t) 0, 
+            [](size_t left, size_t right) -> size_t {
+                return left > right ? left : right;
+            }, 
+            [](size_t index, Digit value) -> size_t {
+                if(value != 0)
+                    return index;
+                else 
+                    return (size_t) 0;
+            });
 
+        //if wasnt found
+        if(index == 0 && digits.size() > 0)
+        {
+            if(digits[0] == 0)
+                index -= 1;
+        }
+
+        return index;
+    }
+    #endif
     //we could probably come up with a procedure that merges both inc_or_decr and add_or_sub but 
     // the code woiuld just be more complex and would reuqire us passing iterators
 
@@ -265,17 +368,15 @@ namespace naf
         const auto op_binary = is_increment ? ops::add : ops::sub;
         Size max_size = std::max(left->size(), right.size());
 
-        //left->resize(max_size + 1);
-        left->resize(max_size);
+        left->resize(max_size + 1);
 
         std::transform(parallel, left->begin(), left->begin() + right.size(),
             right.begin(), left->begin(), op_binary);
 
-        carry->clear();
-        carry->resize(max_size);
+        carry->resize_for_overwrite(max_size);
 
-        auto indices = iota_view(Size(0), max_size);
-        std::for_each(indices.begin(), indices.end(), [&](Size index) {
+        Iota_View indices = Iota_View(Size(0), max_size);
+        std::for_each(parallel, indices.begin(), indices.end(), [&](Size index) {
             if ((*left)[index] >= max_digit) {
                 (*carry)[index] = 1;
                 (*left)[index] -= base;
@@ -298,10 +399,6 @@ namespace naf
 
     static void add_or_sub(Digits* restrict output, Digits* restrict carry, Digits const& restrict left, Digits const& restrict right, bool is_addition)
     {
-        *output = left;
-        incr_or_decr(carry, output, right, is_addition);
-        return;
-
         const auto op_binary = is_addition ? ops::add : ops::sub;
         const auto op_unary = is_addition ? ops::add_zero : ops::sub_zero;
 
@@ -309,8 +406,8 @@ namespace naf
         Size min_size = std::min(left.size(), right.size());
 
         //output->clear();
-        //output->resize(max_size + 1);
-        output->resize_for_overwrite(max_size);
+        output->resize_for_overwrite(max_size + 1);
+        (*output)[max_size] = 0;
 
         //perform the binary op on common portion of all inputs
         std::transform(parallel, left.begin(), left.begin() + min_size,
@@ -330,24 +427,24 @@ namespace naf
                 output->begin() + min_size, op_unary);
         }
 
-        //carry->clear();
-        //carry->resize(max_size);
-        //auto indices = iota_view(Size(0), max_size);
-        //std::for_each(indices.begin(), indices.end(), [&](Size index) {
-        //    if ((*output)[index] >= max_digit) {
-        //        (*carry)[index] = 1;
-        //        (*output)[index] -= base;
-        //    } else if ((*output)[index] <= -max_digit) {
-        //        (*carry)[index] = -1;
-        //        (*output)[index] += base;
-        //    } else {
-        //        (*carry)[index] = 0;
-        //    }
-        //});
+        carry->resize_for_overwrite(max_size);
 
-        //std::transform(parallel, 
-        //    output->begin() + 1, output->begin() + 1 + carry->size(), 
-        //    carry->begin(), output->begin() + 1, op_binary);
+        auto indices = Iota_View(Size(0), max_size);
+        std::for_each(parallel, indices.begin(), indices.end(), [&](Size index) {
+            if ((*output)[index] >= max_digit) {
+                (*carry)[index] = 1;
+                (*output)[index] -= base;
+            } else if ((*output)[index] <= -max_digit) {
+                (*carry)[index] = -1;
+                (*output)[index] += base;
+            } else {
+                (*carry)[index] = 0;
+            }
+            });
+
+        std::transform(parallel, 
+            output->begin() + 1, output->begin() + 1 + carry->size(), 
+            carry->begin(), output->begin() + 1, op_binary);
 
         Size non_zero = find_first_non_zero(*output);
         if(non_zero + 1 < output->size())
@@ -416,15 +513,14 @@ namespace naf
         output->clear();
         output->reserve(result_length);
 
-        const auto this_indices = iota_view(Size(0), left.size());
-        const auto other_indices = iota_view(Size(0), right.size());
+        const auto this_indices = Iota_View(Size(0), left.size());
+        const auto other_indices = Iota_View(Size(0), right.size());
 
         std::for_each(this_indices.begin(), this_indices.end(), [&](Size i) {
             std::fill(parallel, augend->begin(), augend->end(), 0);
             std::fill(parallel, carry->begin(), carry->end(), 0);
 
-            //can be paralel but requires random access iota_view @TODO
-            std::for_each(other_indices.begin(), other_indices.end(),
+            std::for_each(parallel, other_indices.begin(), other_indices.end(),
                 [&](Size j) {
                     Digit product = left[i] * right[j];
                     (*augend)[i + j] = product % naf::base;

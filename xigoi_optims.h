@@ -7,10 +7,9 @@
 #include <iostream>
 #include <ranges>
 #include <vector>
-
 #include "naf.h"
 
-namespace xigoi2
+namespace xigoi_optims
 {
     using std::accumulate;
     using std::cout;
@@ -36,7 +35,7 @@ namespace xigoi2
     /// An arbitrary-size integer, stored using a redundant balanced radix system.
     class Integer {
 
-    public:
+    private:
         /// Digits are stored starting with the least significant position.
         Digits digits;
         /// The radix used for the integers.
@@ -88,15 +87,33 @@ namespace xigoi2
             return *this;
         }
 
+        /// Subtract two Integers in place.
+        Integer &operator-=(const Integer &other) {
+            Digits carry;
+            naf::incr_or_decr(&carry, &this->digits, other.digits, false);
+
+            return *this;
+        }
+
         /// Add two Integers.
         Integer operator+(const Integer &other) const {
-            Integer out;
+
             Digits carry;
-            naf::add_or_sub(&out.digits, &carry, this->digits, other.digits, true);
-            return out;
-            //auto result = *this;
-            //result += other;
-            //return result;
+            Integer output;
+            naf::add_or_sub(&output.digits, &carry, this->digits, other.digits, true);
+
+            return output;
+        }
+
+
+        /// Add two Integers.
+        Integer operator-(const Integer &other) const {
+
+            Digits carry;
+            Integer output;
+            naf::add_or_sub(&output.digits, &carry, this->digits, other.digits, false);
+
+            return output;
         }
 
         /// Calculate the additive inverse of an Integer in place.
@@ -108,35 +125,11 @@ namespace xigoi2
         /// Calculate the additive inverse of an Integer.
         Integer operator-() const {
             Digits result;
-            
             result.resize(digits.size());
             transform(parallel, digits.begin(), digits.end(), result.begin(),
                 [](Digit digit) { return -digit; });
             return Integer(result);
         }
-
-        /// Subtract two Integers in place.
-        Integer &operator-=(const Integer &other) {
-            Digits carry;
-            naf::incr_or_decr(&carry, &this->digits, other.digits, false);
-
-            return *this;
-
-            //*this += (-other);
-            //return *this;
-        }
-
-        /*
-        Integer operator-(const Integer &other) const {
-            Integer out;
-            Digits carry;
-            naf::add_or_sub(&out.digits, &carry, this->digits, other.digits, false);
-            return out;
-        }
-        */
-
-         //Subtract two Integers.
-        Integer operator-(const Integer &other) const { return *this + (-other); }
 
         /// Compare an Integer with zero.
         bool is_zero() const { return digits.size() == 0; }
@@ -152,10 +145,10 @@ namespace xigoi2
 
         /// Compare two Integers.
         bool operator==(const Integer &other) const {
-            return (*this - other).is_zero();
+            return naf::are_equal(this->digits, other.digits);
         }
         bool operator!=(const Integer &other) const {
-            return (*this - other).is_nonzero();
+            return (*this == other) == false;
         }
         bool operator>(const Integer &other) const {
             return (*this - other).is_positive();
@@ -169,7 +162,8 @@ namespace xigoi2
         bool operator<=(const Integer &other) const {
             return (*this - other).is_zero_or_negative();
         }
-        
+
+        /// Multiply two Integers.
         Integer operator*(const Integer &other) const {
             Integer out;
             Digits temp;
@@ -178,6 +172,36 @@ namespace xigoi2
             naf::mul(&out.digits, &temp, &augend, &carry, this->digits, other.digits);
 
             return out;
+
+            #if 0
+            // Optimization: this algorithm is faster
+            // when multiplying a shorter number by a longer number.
+            if (digits.size() > other.digits.size()) {
+                return other * *this;
+            }
+            Size result_length = digits.size() + other.digits.size();
+            Integer result = 0;
+            Digits augend;
+            Digits carry;
+            augend.resize(result_length);
+            carry.resize(result_length);
+
+            auto this_indices = iota_view(Size(0), digits.size());
+            auto other_indices = iota_view(Size(0), other.digits.size());
+            for_each(this_indices.begin(), this_indices.end(), [&](Size i) {
+                fill(parallel, augend.begin(), augend.end(), 0);
+                fill(parallel, carry.begin(), carry.end(), 0);
+                for_each(other_indices.begin(), other_indices.end(),
+                    [&](Size j) {
+                        auto product = digits[i] * other.digits[j];
+                        augend[i + j] = product % base;
+                        carry[i + j + 1] = product / base;
+                    });
+                result += Integer(augend);
+                result += Integer(carry);
+                });
+            return result;
+            #endif
         }
 
         /// Multiply two Integers in place.
@@ -186,19 +210,31 @@ namespace xigoi2
             return *this;
         }
 
-        Integer half() const 
-        {
+        /// Divide an Integer by two, rounding toward zero.
+        Integer half() const {
+            //@BUG - when zero input acesses ouyt of bounds
+            if(this->digits.size() == 0)
+                return Integer();
+
             Integer result;
-            naf::half(&result.digits, this->digits);
+            result.digits.resize(digits.size());
+            transform(parallel, digits.begin(), digits.end(), result.digits.begin(),
+                [](Digit digit) { return digit / 2; });
+            transform(parallel, digits.begin() + 1, digits.end(), result.digits.begin(),
+                result.digits.begin(), [](Digit high, Digit low) {
+                    return low + (high % 2) * half_base;
+                });
+            if (result.digits.back() == 0) {
+                result.digits.pop_back();
+            }
             return result;
         }
 
+        #if 1
         /// Divide two Integers, rounding toward zero.
         /// Uses binary search because normal division
         /// would be extremely complicated and
         /// this works quite well.
-        
-        /*
         Integer operator/(const Integer &other) const {
             if (other.is_zero()) {
                 throw domain_error("Division by zero");
@@ -212,13 +248,17 @@ namespace xigoi2
             } else if (is_negative()) {
                 return -((-*this) / other);
             }
+
             Integer low = 0;
             Integer high = *this;
             Integer middle;
             Integer diff;
-            do {
+
+            do 
+            {
                 middle = (low + high).half();
                 diff = other * middle - *this;
+
                 if (diff.is_zero()) {
                     return middle;
                 } else if (diff.is_positive()) {
@@ -226,11 +266,70 @@ namespace xigoi2
                 } else {
                     low = middle + 1;
                 }
-            } while (low != high);
+            } 
+            while (high != low);
             return low - 1;
         }
-        */
+        #else
+        Integer operator/(const Integer &other) const {
+            if (other.is_zero()) {
+                throw domain_error("Division by zero");
+            }
+            if (other.is_negative()) {
+                if (is_negative()) {
+                    return (-*this) / (-other);
+                } else {
+                    return -(*this / (-other));
+                }
+            } else if (is_negative()) {
+                return -((-*this) / other);
+            }
 
+            Integer normalized_this = this->is_zero_or_positive() ? *this : -*this;
+            Integer normalized_other = other.is_zero_or_positive() ? other : -other;
+
+            Integer diff;
+            Integer low = 0; 
+            Integer high = normalized_this;
+            Integer middle; 
+
+            Integer muled;
+            Integer temp;
+            Integer augend; 
+            Integer carry; 
+            Integer one = 1;
+
+            do
+            {
+                //middle = (low + high).half();
+                naf::add_or_sub(&temp.digits, &carry.digits, low.digits, high.digits, true);
+                naf::half(&middle.digits, temp.digits);
+
+                //diff = other * middle - *this;
+                naf::mul(&muled.digits, &temp.digits, &augend.digits, &carry.digits, normalized_other.digits, middle.digits);
+                naf::add_or_sub(&diff.digits, &carry.digits, muled.digits, normalized_this.digits, false);
+
+                if (diff.is_zero()) {
+                    //return make_pair(std::move(middle), std::move(diff));
+                    return middle;
+                } else if (diff.is_positive()) {
+                    high = middle;
+                } else {
+                    naf::add_or_sub(&low.digits, &carry.digits, middle.digits, one.digits, true);
+                    //low = middle + 1;
+                }
+            } 
+            while (low != high);
+
+
+            //return low - 1;
+            naf::incr_or_decr(&carry.digits, &low.digits, one.digits, false);
+            return low;
+        }
+
+        #endif
+
+        #if 0
         pair<Integer, Integer> divmod(const Integer &other, bool only_div = false) const
         {
             if (other.is_zero()) {
@@ -248,14 +347,16 @@ namespace xigoi2
                 sign = -1;
             }
 
-            Integer normalized_this = this->is_zero_or_positive() ? *this : -*this;
-            Integer normalized_other = other.is_zero_or_positive() ? other : -other;
+            //normalize if negative
+            Integer normalized_this_storage = this->is_negative() ? -*this : Integer();
+            Integer normalized_other_storage = other.is_negative() ? -other : Integer();
+
+            const Integer* normalized_this = this->is_negative() ? &normalized_this_storage : this;
+            const Integer* normalized_other = other.is_negative() ? &normalized_other_storage : &other;
 
             Integer diff;
             Integer low; 
-            Integer high = normalized_this;
-            Integer old_low;
-            Integer old_high;
+            Integer high = *normalized_this;
 
             Integer middle; 
             Integer muled;
@@ -264,31 +365,26 @@ namespace xigoi2
             Integer carry; 
             Integer one = 1;
 
-            //Integer low = 0;
-            //Integer high = *this;
-            //Integer middle;
-            //Integer diff;
-            while(true) 
+            do
             {
                 //middle = (low + high).half();
+                middle = Integer();
                 naf::add_or_sub(&temp.digits, &carry.digits, low.digits, high.digits, true);
                 naf::half(&middle.digits, temp.digits);
 
                 //diff = other * middle - *this;
-                naf::mul(&muled.digits, &temp.digits, &augend.digits, &carry.digits, normalized_other.digits, middle.digits);
-                naf::add_or_sub(&diff.digits, &carry.digits, muled.digits, normalized_this.digits, false);
+                naf::mul(&muled.digits, &temp.digits, &augend.digits, &carry.digits, normalized_other->digits, middle.digits);
+                naf::add_or_sub(&diff.digits, &carry.digits, muled.digits, normalized_this->digits, false);
 
-                if (diff.is_zero()) 
-                {
-                   return make_pair(std::move(middle), std::move(diff));
-
+                if (diff.is_zero()) {
+                    return make_pair(std::move(middle), std::move(diff));
                 } else if (diff.is_positive()) {
-                    high = middle;
+                    high = std::move(middle);
                 } else {
                     naf::add_or_sub(&low.digits, &carry.digits, middle.digits, one.digits, true);
                 }
             } 
-            while (naf::are_equal(low.digits, high.digits) == false);
+            while (low != high);
 
 
             naf::incr_or_decr(&carry.digits, &low.digits, one.digits, false);
@@ -303,9 +399,15 @@ namespace xigoi2
 
             return make_pair(std::move(low), std::move(diff));
         }
+        #else
+        /// Divide two integers, rounding toward zero.
+        /// Returns both the quotient and the remainder.
+        pair<Integer, Integer> divmod(const Integer &other) {
+            Integer quot = *this / other;
+            return make_pair(quot, *this - other * quot);
+        }
 
 
-        #if 0
         /// Divide two Integers in place, rounding toward zero.
         Integer &operator/=(const Integer &other) {
             *this = *this / other;
@@ -314,8 +416,6 @@ namespace xigoi2
 
         /// Calculate the remainder after division of two Integers.
         /// m / n + m % n == m
-        // -m / n + (-m) % n = -m
-
         Integer operator%(const Integer &other) {
             Integer quot = *this / other;
             return *this - other * quot;
@@ -326,14 +426,8 @@ namespace xigoi2
             *this = *this % other;
             return *this;
         }
-
-        /// Divide two integers, rounding toward zero.
-        /// Returns both the quotient and the remainder.
-        pair<Integer, Integer> divmod(const Integer &other) {
-            Integer quot = *this / other;
-            return make_pair(quot, *this - other * quot);
-        }
         #endif
+
 
         /// Output the decimal representation of an Integer to a stream.
         friend ostream &operator<<(ostream &out, Integer n);

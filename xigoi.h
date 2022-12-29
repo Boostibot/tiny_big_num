@@ -7,6 +7,7 @@
 #include <iostream>
 #include <ranges>
 #include <vector>
+#include "naf.h"
 
 namespace xigoi
 {
@@ -22,7 +23,7 @@ namespace xigoi
     using std::pair;
     using std::string;
     using std::transform;
-    using std::ranges::iota_view;
+    using naf::Iota_View;
     using std::views::reverse;
 
     using Digit = long long;
@@ -81,15 +82,15 @@ namespace xigoi
         /// https://arxiv.org/pdf/1102.5683.pdf
         Integer &operator+=(const Integer &other) {
             Size length = max(digits.size(), other.digits.size());
-            digits.resize(length + 1, 0);
+            digits.resize(length + 1);
             transform(parallel, other.digits.begin(), other.digits.end(),
                 digits.begin(), digits.begin(),
                 [](Digit x, Digit y) { return x + y; });
             Digits carry(length);
             
             
-            auto indices = iota_view(Size(0), length);
-            for_each(indices.begin(), indices.end(), [&](Size index) {
+            auto indices = Iota_View(Size(0), length);
+            for_each(parallel, indices.begin(), indices.end(), [&](Size index) {
                 if (digits[index] >= max_digit) {
                     carry[index] = 1;
                     digits[index] -= base;
@@ -184,12 +185,12 @@ namespace xigoi
             Integer result = 0;
             Digits augend(result_length);
             Digits carry(result_length);
-            auto this_indices = iota_view(Size(0), digits.size());
-            auto other_indices = iota_view(Size(0), other.digits.size());
+            auto this_indices = Iota_View(Size(0), digits.size());
+            auto other_indices = Iota_View(Size(0), other.digits.size());
             for_each(this_indices.begin(), this_indices.end(), [&](Size i) {
                 fill(parallel, augend.begin(), augend.end(), 0);
                 fill(parallel, carry.begin(), carry.end(), 0);
-                for_each(other_indices.begin(), other_indices.end(),
+                for_each(parallel, other_indices.begin(), other_indices.end(),
                     [&](Size j) {
                         auto product = digits[i] * other.digits[j];
                         augend[i + j] = product % base;
@@ -326,7 +327,7 @@ namespace xigoi
 
     /// Calculate the factorial of a Digit.
     Integer factorial(Digit n) {
-        auto range = iota_view(Digit(1), n + 1);
+        auto range = Iota_View(Digit(1), n + 1);
         return accumulate(range.begin(), range.end(), Integer(1),
             [](const Integer &i, Digit k) { return i * k; });
     }

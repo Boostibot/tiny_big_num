@@ -53,5 +53,8 @@
     <ClInclude Include="naf.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="xigoi3.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
 </Project>

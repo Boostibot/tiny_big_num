@@ -156,6 +156,7 @@
     <ClInclude Include="unrelated.h" />
     <ClInclude Include="xigoi.h" />
     <ClInclude Include="xigoi2.h" />
+    <ClInclude Include="xigoi3.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
