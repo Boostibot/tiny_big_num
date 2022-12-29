@@ -12,18 +12,11 @@
 #include <cmath>
 #include <chrono>
 
-template <BIG_INT_TEMPL>
-runtime_proc print_digits(Big_Int_T const& num)
-{
-    for(let word : num)
-        std::cout << cast(u64) word;
-}
-
-void print(Benchmark_Combined_Results const& combined)
+void print(const char* name, Benchmark_Combined_Results const& combined)
 {
     auto reuslt = combined.results;
     auto stats = combined.stats;
-    std::cout << std::endl;
+    std::cout << name << std::endl;
     std::cout << "total_time: " << reuslt.total_real_time / 1'000'000 << "\n";
     std::cout << "ms_per_iter: " << reuslt.ms_per_iter << "\n";
     std::cout << "time: " << reuslt.time/ 1'000'000  << "\n";
@@ -41,6 +34,7 @@ void print(Benchmark_Combined_Results const& combined)
     std::cout << "\tmin: " << stats.min_delta << "\n";
     std::cout << std::endl;
 }
+
 
 struct Distribution
 {

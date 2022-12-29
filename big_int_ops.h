@@ -1518,7 +1518,6 @@ proc div_bit_by_bit(Slice<T>* quotient, Slice<T>* remainder, Slice<const T> num,
         return wrap(Div_Res<T>{stripped_quotient, stripped_remainder});
     }
 
-    //I am tired of thinking... I am just gonna copy some algorithm from wikipedia
     Slice<T> curr_remainder = trim(trimmed_remainder, 0);
     for(size_t i = BIT_SIZE<T> * num.size; i-- > 0; ) 
     {
@@ -1566,11 +1565,6 @@ proc rem_bit_by_bit(Slice<T>* remainder, Slice<const T> num, Slice<const T> den,
     return wrap(div_res.remainder);
 }
 
-//performs: to = added + multiplied * coef
-//      or: to = multiplied * coef + added
-// these two are equivalent but when done in place the order matters
-//During fuzed quadratic multiply will be called to add back to itself so:
-// to += multiplied * coef
 template <typename T>
 proc fused_mul_add_overflow_batch(Slice<T>* to, Slice<const T> added, Slice<const T> multiplied, T coeficient, 
     Optim_Info const& optims, const Op_Location location = Op_Location::OUT_OF_PLACE, T add_carry = 0, T mul_carry = 0) -> Batch_Overflow<T>
@@ -1937,7 +1931,6 @@ func required_pow_to_size(Slice<const T> num, size_t power) -> size_t
     return item_size;
 }
 
-
 template <typename T>
 func required_pow_by_squaring_single_auxiliary_swap_size(Slice<const T> num, size_t power) -> size_t
 {
@@ -1946,8 +1939,8 @@ func required_pow_by_squaring_single_auxiliary_swap_size(Slice<const T> num, siz
 
     size_t iters = find_last_set_bit(power);
     size_t bits = (log2(num) + 1);
-    //we square the number on every iteration => the number of bits doubles => 2^bits == bits << iters
-    size_t bit_size = bits << iters; 
+    //we square the number on every iteration => the number of bits doubles => 2^iters == 1 << iters
+    size_t bit_size = bits << iters; // == bits * 2^iters == bits * 2^[log2(power)] ~~ bits*power
     size_t item_size = div_round_up(bit_size, BIT_SIZE<T>) + 1;
     return item_size;
 }
@@ -1964,8 +1957,6 @@ func required_pow_by_squaring_auxiliary_size(Slice<const T> num, size_t power) -
 
     return square * 2 + out_swap;
 }
-
-
 
 template <typename T>
 proc pow_by_squaring(Slice<T>* to, Slice<T>* aux, Slice<const T> num, size_t power, Optim_Info const& optims) -> Slice<T>
@@ -2071,7 +2062,7 @@ func required_trivial_pow_auxiliary_size(Slice<const T> num, size_t power) -> si
 
 
 template <typename T>
-proc trivial_pow(Slice<T>* to, Slice<T>* aux, Slice<const T> num, size_t power, Optim_Info const& optims)
+proc trivial_pow(Slice<T>* to, Slice<T>* aux, Slice<const T> num, size_t power, Optim_Info const& optims) -> Slice<T>
 {
     assert(is_striped_number(num));
 
@@ -2119,33 +2110,52 @@ proc trivial_pow(Slice<T>* to, Slice<T>* aux, Slice<const T> num, size_t power, 
     return curr;
 }
 
-//@TODO: figure out optim constant checks - maybe do similar to mul_karatsuba
-//@TODO: implement mul constant optims into the mul proc
 template <typename T>
-proc pow(Slice<T>* to, Slice<T>* aux, Slice<const T> num, size_t power, Optim_Info const& optims)
+proc pow(Slice<T>* to, Slice<T>* aux, Slice<const T> num, size_t power, Optim_Info const& optims) -> Slice<T>
 {
     size_t at_least_to = required_pow_to_size(num, power);
     size_t at_least_aux = required_trivial_pow_auxiliary_size(num, power);
-    size_t single_swap = required_pow_by_squaring_single_auxiliary_swap_size(num, power);
-    size_t by_square_aux = 
-    assert(to->size < at_least_to);
-    assert(aux->size < at_least_aux);
+    assert(to->size >= at_least_to);
+    assert(aux->size >= at_least_aux);
 
+    if(power < optims.trivial_pow_below_power)
+        return trivial_pow<T>(to, aux, num, power, optims);
 
-    size_t iters = find_last_set_bit(power);
-    size_t bits = (log2(num) + 1);
-    //we square the number on every iteration => the number of bits doubles => 2^bits == bits << iters
-    size_t bit_size = bits << iters; 
-    size_t item_size = div_round_up(bit_size, BIT_SIZE<T>) + 1;
+    const size_t required_to_size = required_pow_to_size(num, power);
+    const size_t required_aux_size = required_pow_by_squaring_auxiliary_size(num, power);
 
-    if(power > optims.trivial_pow_below_power )
-    {
-    }
-
+    if(to->size >= required_to_size && aux->size >= required_aux_size)
+        return pow_by_squaring(to, aux, num, power, optims);
 
     return trivial_pow<T>(to, aux, num, power, optims);
-    //figure out to what power we can use else trivial_pow 
-    //do optims here
+
+    const size_t bits = (log2(num) + 1);
+
+    //upper estimate for single swap aux
+    //size_t required_sing_swap_aux_size_rough = (bits*power / BIT_SIZE<T> + 2);
+    //size_t total_aux_size_rough = (bits*power / BIT_SIZE<T> + 2) * 2;
+    //=> 
+    // required = ([bits*power / BIT_SIZE<T>] + 2) * 2
+    // required/2 - 2 = [bits*power / BIT_SIZE<T>]
+    // (required/2 - 2) * BIT_SIZE<T> = [bits*power] - bits*power%BIT_SIZE<T>
+    // [bits*power] = (required/2 - 2) * BIT_SIZE<T> + bits*power%BIT_SIZE<T>
+    // power = ((required/2 - 2) * BIT_SIZE<T> + bits*power%BIT_SIZE<T>) / bits
+    // power < (required/2 - 2) * BIT_SIZE<T> / bits
+
+    size_t max_aux_power = (aux->size/2 - 2) * BIT_SIZE<T> / bits;
+    size_t max_to_power = (aux->size - 2) * BIT_SIZE<T> / bits;
+   
+    size_t max_pow_by_squaring_power = min(max_aux_power, max_to_power);
+    size_t remianing_power = power - max_pow_by_squaring_power;
+    //@TODO: try one power higher than the one caluclated and see if that fit
+    // (rounding errors)
+
+    Slice<T> half_powed = pow_by_squaring(to, aux, num, max_pow_by_squaring_power, optims);
+    Slice<T> new_num = trim(*aux, half_powed.size);
+    Slice<T> remaining_aux = slice(*aux, half_powed.size);
+    copy_slice<T>(&new_num, *to, Iter_Direction::ANY);
+
+    return trivial_pow<T>(to, &remaining_aux, new_num, remianing_power, optims);
 }
 
 template <typename T>

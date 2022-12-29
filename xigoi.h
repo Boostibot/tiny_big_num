@@ -86,6 +86,7 @@ namespace xigoi
                 digits.begin(), digits.begin(),
                 [](Digit x, Digit y) { return x + y; });
             Digits carry(length);
+            
             /*
             auto indices = iota_view(Size(0), length);
             for_each(parallel, indices.begin(), indices.end(), [&](Size index) {
@@ -100,8 +101,10 @@ namespace xigoi
                 }
             });
             */
-            transform(parallel, carry.begin(), carry.end(), digits.begin() + 1,
-                digits.begin() + 1, [](Digit x, Digit y) { return x + y; });
+
+            //@BUG - doesnt ever do anything
+            //transform(parallel, carry.begin(), carry.end(), digits.begin() + 1,
+                //digits.begin() + 1, [](Digit x, Digit y) { return x + y; });
 
                 while (digits.empty() == false && digits.back() == 0) {
                     digits.pop_back();
@@ -208,6 +211,10 @@ namespace xigoi
 
         /// Divide an Integer by two, rounding toward zero.
         Integer half() const {
+            //@BUG - when zero input acesses ouyt of bounds
+            if(this->digits.size() == 0)
+                return Integer();
+
             Integer result(Digits(digits.size()));
             transform(parallel, digits.begin(), digits.end(), result.digits.begin(),
                 [](Digit digit) { return digit / 2; });
@@ -238,21 +245,38 @@ namespace xigoi
             } else if (is_negative()) {
                 return -((-*this) / other);
             }
+
             Integer low = 0;
             Integer high = *this;
             Integer middle;
+            Integer old_low;
+            Integer old_high;
             Integer diff;
-            do {
+
+            do 
+            {
                 middle = (low + high).half();
                 diff = other * middle - *this;
+
                 if (diff.is_zero()) {
                     return middle;
                 } else if (diff.is_positive()) {
+                    std::swap(high, old_high);
                     high = middle;
+
+                    //@BUG - infinite loop prevention here
+                    if(high == old_high)
+                        break;
                 } else {
+                    std::swap(low, old_low);
                     low = middle + 1;
+
+                    //@BUG - infinite loop prevention here
+                    if(low == old_low)
+                        break;
                 }
-            } while (low != high);
+            } 
+            while (high != low);
             return low - 1;
         }
 

@@ -38,13 +38,19 @@
     <ClInclude Include="tests.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="jot\allocator_arena.h">
+    <ClInclude Include="jot\allocator_stack.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="jot\memory.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="xigoi.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="xigoi2.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="naf.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>
