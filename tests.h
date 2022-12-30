@@ -11,7 +11,7 @@
 #include <array>
 #include <algorithm>
 
-//#define USE_CUSTOM_LIB
+#define USE_CUSTOM_LIB
 
 #ifdef USE_CUSTOM_LIB
 #include "jot/stack.h"
@@ -104,7 +104,7 @@ namespace test
     {
         mut vec = make_sized_vector<T>(slice.size, resource);
         mut vec_slice = to_slice(&vec);
-        copy_slice<T>(&vec_slice, slice, Iter_Direction::ANY);
+        copy_slice<T>(&vec_slice, slice, Iter_Direction::NO_ALIAS);
 
         return vec;
     }
@@ -262,25 +262,6 @@ namespace test
         return y;
     }
 
-    u64 ipow_squares(u64 x, u64 n)
-    {
-        if (x <= 1) 
-            return x;
-        if(n == 0)  
-            return 1;
-
-        u64 i = 0;
-        u64 y = 1;
-        size_t max_pos = find_last_set_bit(n);
-        for(; i <= max_pos; i++)
-        {
-            i64 bit = get_bit<u64>(n, i);
-            if(bit)
-                y *= x;
-            x *= x;
-        }
-        return y;
-    }
 
     u64 ipow_trivial(u64 x, u64 n)
     {
@@ -319,61 +300,6 @@ namespace test
         return r;
     }
 
-    u64 iroot_newton(u64 of_value, u64 power)
-    {
-        const u64 x = of_value; 
-        const u64 n = power;
-
-        if(x == 0)
-            return 1;
-        if (x <= 1) 
-            return x;
-
-        //u64 u = x;
-        //u64 s = x+1;
-
-        // We want to find such r that:
-        //   r^n = x
-        // this can be rewritten as: 
-        //   n*log(r) = log(x)
-        // factoring r gives:
-        //   r = e^(log(x) / n)
-        //   r = 2^(log2(x) / 2)
-
-        // we want to find an initial estimate above such r so we need to increase the expression:
-        //  we will perform this by parts:
-        //  log2(x) <= [log2(x)] + 1
-        //  log2(x)/n <= upper[ ([log2(x)] + 1) / n ] = [ ([log2(x)] + 1 + n - 1) / n ]
-        //            = [ ([log2(x)] + n) / n ]
-        // 
-        //  so the upper estimate for r is:
-        //      2^[ ([log2(x)] + n) / n ]
-
-        const u64 log2x = find_last_set_bit(x);
-    
-        const u64 uppe_initial_estimate = cast(u64) 1 << ((log2x + n) / n);
-        u64 r = uppe_initial_estimate;
-        u64 prev_r = -1;
-
-        while(true)
-        {
-            // the newton update
-            u64 new_upper_r = (n-1) * r + x / ipow_squares(r, n-1);
-
-            prev_r = r;
-            r = new_upper_r / n;
-
-            //we monotonically decrease 
-            // => prev_r should always be bigger than r
-            // => if not we break and return the last value that 
-            //     satisfied the condition (prev_r)
-            if(r >= prev_r)
-                break;
-        }
-
-        return prev_r;
-    }
-
     u64 ilog_heyley(u64 of_value, u64 base)
     {
         const u64 x = of_value;
@@ -409,14 +335,10 @@ namespace test
 
             u64 new_y = y - 2*(c_x - x) / (x + c_x);
 
-
-            //if we didnt move at all we are one above the answer (is equivalent to the commented out code
+            //if we didnt move at all we are one above the answer
             if(new_y == y)
                 return new_y - 1;
 
-            //if(new_y == y) 
-                //new_y --;
-            
             y = new_y;
         }
 
@@ -446,30 +368,23 @@ namespace test
         u64 curr_lo = lower_initial_estimate;
         u64 curr_hi = higher_initial_estimate;
 
-        u64 y = (curr_lo + curr_hi) / 2;
-
         while(true)
         {
-            if(curr_hi - curr_lo <= 1)
-                break;
+            u64 mid = (curr_lo + curr_hi) / 2;
+            u64 curr_approx = ipow_squares(b, mid);
 
-            u64 value_from_curr_approximate = ipow_squares(b, y);
-            u64 c_x = value_from_curr_approximate;
-
-            if(c_x > x)
-                curr_hi = y;
-            else if(c_x < x)
-                curr_lo = y;
+            if(curr_approx > x)
+                curr_hi = mid;
+            else if(curr_approx < x)
+                curr_lo = mid + 1;
             else
-            {
-                curr_lo = y;
-                break;
-            }
+                return mid;
 
-            y = (curr_lo + curr_hi) / 2;
+            if(curr_hi <= curr_lo)
+                break;
         }
 
-        return curr_lo;
+        return curr_lo - 1;
     }
 
     runtime_proc test_misc(Random_Generator* generator, size_t random_runs)
@@ -1869,7 +1784,7 @@ namespace test
     }
 
     template <typename T>
-    runtime_proc test_pow_by_squaring(Memory_Resource* memory, Random_Generator* generator, size_t random_runs, size_t controlled_runs)
+    runtime_proc test_pow(Memory_Resource* memory, Random_Generator* generator, size_t random_runs, size_t controlled_runs)
     {
         using Res = Batch_Op_Result;
         using Max = Unsigned_Max;
@@ -1889,7 +1804,7 @@ namespace test
 
         runtime_proc pow_ = [&](CSlice num, size_t pow, Optim_Info optims, Pow_Algorhitm algorhitm) -> Vector {
             size_t required_size = required_pow_to_size(num, pow);
-            size_t aux_size = required_pow_by_squaring_auxiliary_size(num, pow)*100; //for karatsuba
+            size_t aux_size = required_pow_by_squaring_auxiliary_size(num, pow);
             Vector out = make_sized_vector<T>(required_size, resource);
             Vector aux = make_sized_vector<T>(aux_size, resource);
 
@@ -1982,6 +1897,59 @@ namespace test
         assert(optimal_pow(5465, 3) == 5465ull*5465ull*5465ull);
     }
     
+
+    template <typename T>
+    runtime_proc test_root(Memory_Resource* memory, Random_Generator* generator, size_t random_runs, size_t controlled_runs)
+    {
+        using Res = Batch_Op_Result;
+        using Max = Unsigned_Max;
+        using Vector = Vector<T>;
+        using Padded = Padded_Vector<T>;
+        using CSlice = Slice<const T>;
+        using Slice = Slice<T>;
+
+        Memory_Resource* resource = memory;
+
+        runtime_proc root_ = [&](CSlice num, size_t root, Optim_Info optims) -> Vector {
+            size_t required_size = root_required_to_size(log2(num), root, BIT_SIZE<T>);
+            size_t aux_size = root_required_aux_size(log2(num), root, BIT_SIZE<T>);
+            Vector out = make_sized_vector<T>(required_size, resource);
+            Vector aux = make_sized_vector<T>(aux_size, resource);
+
+            Slice out_s = to_slice(&out);
+            Slice aux_s = to_slice(&aux);
+
+            Slice rooted = ::root<T>(&out_s, &aux_s, num, root, optims);
+
+            resize(&out, rooted.size);
+            return out;
+        };
+
+        runtime_proc root = [&](Max num, size_t root, Optim_Info optims = Optim_Info{}) -> Max {
+            Vector num_ = make_vector_of_digits<T>(num, resource);
+            Vector rooted = root_(to_slice(num_), root, optims);
+            CSlice rooted_s = to_slice(rooted);
+
+            Max res = unwrap(to_number(rooted_s));
+            return res;
+        };
+
+
+        assert(root(0, 0) == 1);
+        assert(root(1, 0) == 1);
+        assert(root(29, 3) == 3);
+        assert(root(34, 5) == 2);
+        assert(iroot_newton(15625, 3) == 25);
+        assert(root(15625, 3) == 25);
+        assert(root(15637, 3) == 25);
+        assert(root(4096, 6) == 4);
+        u64 res = iroot_newton(18446744073709551614, 16);
+        //assert(root(18446744073709551614, 16) == 13);
+
+        if(sizeof(T) != 1)
+            assert(root(18446744073709551614, 17) == 13);
+    }
+
     runtime_proc run_typed_tests(Memory_Resource* memory, Random_Generator* generator, size_t random_runs, size_t controlled_runs)
     {
         test_misc(generator, random_runs);
@@ -1990,6 +1958,7 @@ namespace test
     template <typename T>
     runtime_proc run_untyped_tests(Memory_Resource* memory, Random_Generator* generator, size_t random_runs, size_t controlled_runs)
     {
+        test_root<T>(memory, generator, random_runs, controlled_runs);
         test_add_overflow<T>(memory, generator, random_runs);
         test_sub_overflow<T>(memory, generator, random_runs);
         test_complement_overflow<T>(memory, generator, random_runs);
@@ -1998,7 +1967,7 @@ namespace test
         test_div_overflow_low<T>(memory, generator, random_runs, controlled_runs);
         test_mul_quadratic<T>(memory, generator, random_runs);
         test_div_bit_by_bit<T>(memory, generator, random_runs);
-        test_pow_by_squaring<T>(memory, generator, random_runs, controlled_runs);
+        test_pow<T>(memory, generator, random_runs, controlled_runs);
         
         const size_t quarter_runs = random_runs / 4;
         if constexpr(sizeof(T) >= sizeof(u8))
@@ -2030,7 +1999,6 @@ namespace test
         Random_Generator generator(seed);
         const size_t random_runs = 10000;
         const size_t controlled_runs = 500;
-        //assert(116597300 <= jot::memory_constants::MEBI_BYTE*8);
 
         auto ns = ellapsed_time([&](){
             #ifdef USE_CUSTOM_LIB

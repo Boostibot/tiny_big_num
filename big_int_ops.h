@@ -174,7 +174,7 @@ enum class Iter_Direction
 {
     FORWARD,
     BACKWARD,
-    ANY
+    NO_ALIAS
 };
 template <typename T>
 proc copy_n(T* to, const T* from, size_t count, Iter_Direction direction) -> void
@@ -191,7 +191,7 @@ proc copy_n(T* to, const T* from, size_t count, Iter_Direction direction) -> voi
 
     if(DO_RUNTIME_ONLY)
     {
-        if(direction == Iter_Direction::ANY)
+        if(direction == Iter_Direction::NO_ALIAS)
             memcpy(to, from, count * sizeof(T));
         else
             memmove(to, from, count * sizeof(T));
@@ -1477,7 +1477,7 @@ proc div_bit_by_bit(Slice<T>* quotient, Slice<T>* remainder, Slice<const T> num,
         mut stripped_remainder = trim(*remainder, num.size);
         mut stripped_quotient = trim(*quotient, 0);
 
-        copy_slice<T>(&stripped_remainder, num, Iter_Direction::ANY);
+        copy_slice<T>(&stripped_remainder, num, Iter_Direction::NO_ALIAS);
         return wrap(Div_Res<T>{stripped_quotient, stripped_remainder});
     }
 
@@ -1549,6 +1549,12 @@ proc div_bit_by_bit(Slice<T>* quotient, Slice<T>* remainder, Slice<const T> num,
         : trim(trimmed_quotient, 0);
 
     return wrap(Div_Res<T>{stripped_quotient, curr_remainder});
+}
+
+template <typename T>
+proc div(Slice<T>* quotient, Slice<T>* remainder, Slice<const T> num, Slice<const T> den, Optim_Info const& optims) -> Trivial_Maybe<Div_Res<T>>
+{
+    return div_bit_by_bit(quotient, remainder, num, den, optims);
 }
 
 template <typename T>
@@ -1919,43 +1925,76 @@ func log2(Slice<const T> left) -> size_t
     return last_log + (left.size - 1) * BIT_SIZE<T>;
 }
 
-template <typename T>
-func required_pow_to_size(Slice<const T> num, size_t power) -> size_t
+func required_pow_to_size(size_t num_bit_size, size_t power, size_t single_digit_bit_size) -> size_t
 {
-    if(power == 0 || num.size == 0)
+    if(power == 0 || num_bit_size == 0)
         return 1;
 
-    size_t bit_size = (log2(num) + 1) * power;
-    size_t item_size = div_round_up(bit_size, BIT_SIZE<T>) + 1;
+    size_t bit_size = (num_bit_size + 1) * power;
+    size_t item_size = div_round_up(bit_size, single_digit_bit_size) + 1;
 
     return item_size;
 }
 
-template <typename T>
-func required_pow_by_squaring_single_auxiliary_swap_size(Slice<const T> num, size_t power) -> size_t
+func required_pow_by_squaring_single_auxiliary_swap_size(size_t num_bit_size, size_t power, size_t single_digit_bit_size) -> size_t
 {
     if(power == 0)
         return 0;
 
     size_t iters = find_last_set_bit(power);
-    size_t bits = (log2(num) + 1);
+    size_t bits = (num_bit_size + 1);
     //we square the number on every iteration => the number of bits doubles => 2^iters == 1 << iters
     size_t bit_size = bits << iters; // == bits * 2^iters == bits * 2^[log2(power)] ~~ bits*power
-    size_t item_size = div_round_up(bit_size, BIT_SIZE<T>) + 1;
+    size_t item_size = div_round_up(bit_size, single_digit_bit_size) + 1;
     return item_size;
 }
 
-
-template <typename T>
-func required_pow_by_squaring_auxiliary_size(Slice<const T> num, size_t power) -> size_t
+func required_pow_by_squaring_auxiliary_size(size_t num_bit_size, size_t power, size_t single_digit_bit_size) -> size_t
 {
     if(power == 0)
         return 0;
     
-    size_t square = required_pow_by_squaring_single_auxiliary_swap_size(num, power);
-    size_t out_swap = required_pow_to_size(num, power);
+    size_t square = required_pow_by_squaring_single_auxiliary_swap_size(num_bit_size, power, single_digit_bit_size);
+    size_t out_swap = required_pow_to_size(num_bit_size, power, single_digit_bit_size);
 
     return square * 2 + out_swap;
+}
+
+
+template <typename T>
+func required_pow_to_size(Slice<const T> num, size_t power) -> size_t
+{
+    return required_pow_to_size(log2(num), power, BIT_SIZE<T>);
+}
+template <typename T>
+func required_pow_by_squaring_single_auxiliary_swap_size(Slice<const T> num, size_t power) -> size_t
+{
+    return required_pow_by_squaring_single_auxiliary_swap_size(log2(num), power, BIT_SIZE<T>);
+}
+template <typename T>
+func required_pow_by_squaring_auxiliary_size(Slice<const T> num, size_t power) -> size_t
+{
+    return required_pow_by_squaring_auxiliary_size(log2(num), power, BIT_SIZE<T>);
+}
+
+u64 ipow_squares(u64 x, u64 n)
+{
+    if (x <= 1) 
+        return x;
+    if(n == 0)  
+        return 1;
+
+    u64 i = 0;
+    u64 y = 1;
+    size_t max_pos = find_last_set_bit(n);
+    for(; i <= max_pos; i++)
+    {
+        i64 bit = get_bit<u64>(n, i);
+        if(bit)
+            y *= x;
+        x *= x;
+    }
+    return y;
 }
 
 template <typename T>
@@ -1987,7 +2026,7 @@ proc pow_by_squaring(Slice<T>* to, Slice<T>* aux, Slice<const T> num, size_t pow
     {
         if(power == 1)
         {
-            copy_n(to->data, num.data, num.size, Iter_Direction::ANY);
+            copy_n(to->data, num.data, num.size, Iter_Direction::NO_ALIAS);
             return trim(*to, num.size);
         }
         if(power == 2)
@@ -2047,7 +2086,6 @@ proc pow_by_squaring(Slice<T>* to, Slice<T>* aux, Slice<const T> num, size_t pow
     return curr_output;
 }
 
-
 template <typename T>
 func required_trivial_pow_auxiliary_size(Slice<const T> num, size_t power) -> size_t
 {
@@ -2096,7 +2134,7 @@ proc trivial_pow(Slice<T>* to, Slice<T>* aux, Slice<const T> num, size_t power, 
         std::swap(output_aux1, output_aux2);
 
     Slice<T> curr = trim(output_aux1, num.size);
-    copy_slice<T>(&curr, num, Iter_Direction::ANY);
+    copy_slice<T>(&curr, num, Iter_Direction::NO_ALIAS);
 
     for(size_t i = 0; i < num_assignments; i++)
     {
@@ -2153,10 +2191,217 @@ proc pow(Slice<T>* to, Slice<T>* aux, Slice<const T> num, size_t power, Optim_In
     Slice<T> half_powed = pow_by_squaring(to, aux, num, max_pow_by_squaring_power, optims);
     Slice<T> new_num = trim(*aux, half_powed.size);
     Slice<T> remaining_aux = slice(*aux, half_powed.size);
-    copy_slice<T>(&new_num, *to, Iter_Direction::ANY);
+    copy_slice<T>(&new_num, *to, Iter_Direction::NO_ALIAS);
 
     return trivial_pow<T>(to, &remaining_aux, new_num, remianing_power, optims);
 }
+
+
+func root_estimate_bit_size(size_t num_bit_size, size_t root) -> size_t {
+    //const u64 upper_initial_estimate = cast(u64) 1 << ((log2x + n) / n);
+    size_t estimate_bit_size = (num_bit_size + root) / root;
+    return estimate_bit_size;
+}
+
+func root_required_to_size(size_t num_bit_size, size_t root, size_t single_digit_bit_size) -> size_t {
+    if(root == 0)
+        return 1;
+
+    if(root == 1)
+        return div_round_up(num_bit_size, single_digit_bit_size);
+
+    //the +1 is for the addition of the quotient we perform in place
+    return div_round_up(root_estimate_bit_size(num_bit_size, root), single_digit_bit_size) + 1;
+}
+
+func root_required_aux_size(size_t num_bit_size, size_t root, size_t single_digit_bit_size) -> size_t {
+
+    size_t other_estimate_size = root_required_to_size(num_bit_size, root, single_digit_bit_size);
+    size_t pow_aux_size = required_pow_by_squaring_auxiliary_size(num_bit_size, root, single_digit_bit_size);
+    size_t pow_to_size = required_pow_by_squaring_auxiliary_size(num_bit_size, root, single_digit_bit_size);
+
+    return other_estimate_size + pow_aux_size + pow_to_size;
+}
+
+
+u64 iroot_newton(u64 of_value, u64 power)
+{
+    const u64 x = of_value; 
+    const u64 n = power;
+
+    if(x == 0)
+        return 1;
+    if (x <= 1) 
+        return x;
+
+    //u64 u = x;
+    //u64 s = x+1;
+
+    // We want to find such r that:
+    //   r^n = x
+    // this can be rewritten as: 
+    //   n*log(r) = log(x)
+    // factoring r gives:
+    //   r = e^(log(x) / n)
+    //   r = 2^(log2(x) / 2)
+
+    // we want to find an initial estimate above such r so we need to increase the expression:
+    //  we will perform this by parts:
+    //  log2(x) <= [log2(x)] + 1
+    //  log2(x)/n <= upper[ ([log2(x)] + 1) / n ] = [ ([log2(x)] + 1 + n - 1) / n ]
+    //            = [ ([log2(x)] + n) / n ]
+    // 
+    //  so the upper estimate for r is:
+    //      2^[ ([log2(x)] + n) / n ]
+
+    const u64 log2x = find_last_set_bit(x);
+
+    const u64 upper_initial_estimate = cast(u64) 1 << ((log2x + n) / n);
+    u64 r = upper_initial_estimate;
+    u64 prev_r = -1;
+
+    while(true)
+    {
+        // the newton update
+        u64 new_upper_r = (n-1) * r + x / ipow_squares(r, n-1);
+
+        prev_r = r;
+        r = new_upper_r / n;
+
+        //we monotonically decrease 
+        // => prev_r should always be bigger than r
+        // => if not we break and return the last value that 
+        //     satisfied the condition (prev_r)
+        if(r >= prev_r)
+            break;
+    }
+
+    return prev_r;
+    }
+
+
+template <typename T>
+proc root(Slice<T>* to, Slice<T>* aux, Slice<const T> num, size_t root, Optim_Info const& optims) -> Slice<T>
+{
+    size_t num_bit_size = log2(num);   
+    size_t required_to_size = root_required_to_size(num.size, root, BIT_SIZE<T>);
+    size_t required_aux_size = root_required_aux_size(num_bit_size, root, BIT_SIZE<T>);
+
+    assert(to->size >= required_to_size);
+    assert(aux->size >= required_aux_size);
+
+    assert(high_bits(cast(T) root) == 0 && "only small roots allowed - would require generalization of this algorhitm");
+    if(num.size == 0)
+    {
+        to->data[0] = 1;
+        return trim(*to, 1);
+    }
+
+    if(root <= 0)
+    {
+        Slice<T> ret = trim(*to, num.size);
+        copy_slice<T>(&ret, num, Iter_Direction::NO_ALIAS);
+        return ret;
+    }
+
+    if(num.size == 1)
+    {
+        to->data[0] = cast(T) iroot_newton(cast(u64) num[0], cast(u64) root);
+        return trim(*to, 1);
+    }
+    size_t estimate_bit_size = root_estimate_bit_size(num_bit_size, root);
+
+    Slice<T> out1 = *to;
+    Slice<T> out2 = trim(*aux, required_to_size);
+    Slice<T> rest_aux = slice(*aux, required_to_size);
+
+    Slice<T> initial_estimate = out2;
+
+    null_slice(&initial_estimate);
+    set_nth_bit<T>(&initial_estimate, estimate_bit_size, 1);
+    initial_estimate = striped_trailing_zeros(initial_estimate);
+    //assert(is_striped_number(curr_estimate));
+
+    Slice<T> curr_estimate = initial_estimate;
+    Slice<T> prev_estimate = {};
+
+
+    while(true)
+    {
+        prev_estimate = curr_estimate;
+        assert(is_striped_number(prev_estimate));
+
+        //new_upper_r = (root-1) * prev_estimate + num / ipow_squares(prev_estimate, root-1);
+
+        
+        //the sizes we will need to store the results:
+        size_t powed_size = required_pow_to_size<T>(prev_estimate, root - 1);
+        size_t muled_size = required_mul_to_size(prev_estimate.size, 1);
+
+        //assert(powed_size <= num.size && "is it?");
+        
+        //we will perform the operations in order of most memory consumption.
+        // that way they can use as much still-not-occupied storage to speed up their execution
+        Slice<T> pow_to = trim(rest_aux, powed_size);
+        Slice<T> after_pow_aux = slice(rest_aux, powed_size);
+        Slice<T> powed = pow<T>(&pow_to, &after_pow_aux, prev_estimate, root - 1, optims);
+
+        size_t div_size = required_div_quotient_size(num.size, powed.size) + 1;
+        size_t rem_size = required_div_remainder_size(num.size, powed.size);
+
+        Slice<T> div_to = trim(after_pow_aux, div_size);
+        Slice<T> after_div_aux = slice(after_pow_aux, div_size);
+        Slice<T> rem_to = trim(after_div_aux, rem_size);
+
+
+        Div_Res<T> res = unwrap(div<T>(&div_to, &rem_to, num, powed, optims));
+        Slice<T> dived = res.quotient;
+        assert(is_striped_number(dived));
+
+        size_t add_size = required_add_to_size(muled_size, dived.size);
+
+        Slice<T> new_estimate_to = out1;
+        assert(new_estimate_to.data != prev_estimate.data && "storages must differ");
+        assert(new_estimate_to.size >= add_size || true &&  
+            "should fit into the prepared slot - maybe will fail because add_size is theoretical reuquired size"
+            "but new_estimate_to.size is the actual real size which might - and probably be - smaller than the theoretical size"
+            "we might have to lie about size to the algorhitm here!");
+
+        //we perform the multiply add fused
+        Batch_Overflow<T> fused_result;
+        
+        if(dived.size != 0)
+            fused_result = fused_mul_add_overflow_batch<T>(&new_estimate_to, dived, prev_estimate, cast(T) root - 1, optims);
+        else
+            fused_result = mul_overflow_batch<T>(&new_estimate_to, prev_estimate, cast(T) root - 1, optims);
+            
+        assert(fused_result.overflow == 0 && "should not overflow");
+        assert(is_striped_number(fused_result.slice));
+        std::swap(out1, out2);
+
+
+        //r = new_upper_r / n;
+        Slice<T> new_upper_estimate = fused_result.slice;
+        Slice<T> new_estimate_pre = div_overflow_low_batch<T>(&new_upper_estimate, new_upper_estimate, cast(T) root, optims).slice;
+        Slice<T> new_estimate = striped_trailing_zeros(new_estimate_pre);
+        curr_estimate = new_estimate;
+
+        //if(r >= prev_r)
+            //break; //and the result is in prev_estimate (estimates shoudl be equal but just to be safe)
+        int compared = compare<T>(new_estimate, prev_estimate);
+        if(compared >= 0)
+            break;
+    }
+
+    if(prev_estimate.data == to->data)
+        return prev_estimate;
+
+    //if the current output is in the wrong storage copy over
+    Slice<T> dest = trim(*to, prev_estimate.size);
+    copy_slice<T>(&dest, prev_estimate, Iter_Direction::NO_ALIAS);
+    return dest;
+}
+
 
 template <typename T>
 proc reverse(Slice<T>* arr) -> void
