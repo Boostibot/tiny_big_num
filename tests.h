@@ -492,6 +492,21 @@ namespace test
         assert(ilog_bsearch(63, 4) == 2);
         assert(ilog_bsearch(64, 4) == 3);
 
+        assert((highest_power_of_in_type(2, 2) == Power_And_Powed{1, 2}));
+        assert((highest_power_of_in_type(1, 2) == Power_And_Powed{0, 1}));
+        assert((highest_power_of_in_type(16, 2) == Power_And_Powed{15, 1 << 15}));
+        assert((highest_power_of_in_type(8, 3) == Power_And_Powed{5, 243}));
+
+        assert((highest_power_of_in_type(0, 10) == Power_And_Powed{0, 1}));
+        assert((highest_power_of_in_type(1, 10) == Power_And_Powed{0, 1}));
+        assert((highest_power_of_in_type(2, 10) == Power_And_Powed{0, 1}));
+        assert((highest_power_of_in_type(4, 10) == Power_And_Powed{1, 10}));
+        assert((highest_power_of_in_type(8, 10) == Power_And_Powed{2, 100}));
+        assert((highest_power_of_in_type(16, 10) == Power_And_Powed{4, 10'000}));
+        assert((highest_power_of_in_type(32, 10) == Power_And_Powed{9, 1'000'000'000}));
+        assert((highest_power_of_in_type(33, 10) == Power_And_Powed{9, 1'000'000'000}));
+        assert((highest_power_of_in_type(34, 10) == Power_And_Powed{10, 10'000'000'000}));
+        assert((highest_power_of_in_type(64, 10) == Power_And_Powed{19, 10'000'000'000'000'000'000}));
 
         constexpr u64 max = std::numeric_limits<u64>::max()/2;
         constexpr u64 min = 2;
@@ -1659,7 +1674,6 @@ namespace test
         runtime_proc test_to_base = [&](Slice<const Num> num, Num base, Slice<const Rep> expected_rep, Optim_Info optims) -> bool 
         {
             Vector<Rep> converted = to_base<Num, Rep>(num, base, id_to_conversion, optims, resource);
-        
             assert(is_striped_representation(expected_rep));
 
             return is_equal<Rep>(to_slice(converted), expected_rep);
@@ -1749,7 +1763,8 @@ namespace test
         constexpr size_t max_2 = std::numeric_limits<Num>::max() >> HALF_BIT_SIZE<Num>;
 
         let base_dist = make_exponential_distribution<Num, Num>(2, cast(Num) min(max_1, max_2));
-    
+        assert(auto_test_to_base(250, 2, Optim_Info{}));
+
         for(size_t i = 0; i < random_runs; i++)
         {
             Optim_Info optims = generate_random_optims(generator);
@@ -1993,6 +2008,26 @@ namespace test
 
         if constexpr(sizeof(T) >= sizeof(u64))
             test_to_base<T, u64>(memory, generator, quarter_runs);
+
+        if constexpr(sizeof(T) >= sizeof(u64))
+        {
+            size_t fact_of = 1000;
+            Vector<T> digits = make_sized_vector<T>(fact_of, memory);
+            Vector<T> digits = make_sized_vector<T>(fact_of, memory);
+            Slice<T> digits_s = to_slice(&digits);
+
+
+            auto time = ellapsed_time([&]{
+                Slice<T> output = factorial<T>(&digits_s, fact_of, Optim_Info{});
+                size_t size = required_size_to_base<T>(output.size, 10);
+                Vector<T> converted = make_sized_vector<T>(fact_of, memory);
+
+            });
+
+            std::cout << "FACTORIAL 1000: " << time << std::endl; //173000
+        }
+
+
         std::cout << "ok" << std::endl;
         std::cout << "=== OK ===\n" << std::endl;
     }

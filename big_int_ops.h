@@ -2435,6 +2435,76 @@ proc reverse(Slice<T>* arr) -> void
         std::swap(ref[i], ref[ref.size - i - 1]);
 }
 
+
+struct Power_And_Powed
+{
+    size_t power;
+    size_t powed;
+
+    bool constexpr operator ==(Power_And_Powed const&) const noexcept = default;
+};
+
+func highest_power_of_in_type(size_t type_bit_size, size_t base) -> Power_And_Powed
+{
+    assert(type_bit_size <= 64 && "no higher sizes supported");
+
+    if(type_bit_size <= 1) 
+        return {0, 1};
+
+    switch(base)
+    {
+    case 10: 
+        if(type_bit_size < 4)    return {0, 1};
+        if(type_bit_size == 4)   return {1, 10};
+        if(type_bit_size == 8)   return {2, 100};
+        if(type_bit_size == 16)  return {4, 10'000};
+        if(type_bit_size == 32)  return {9, 1'000'000'000};
+        if(type_bit_size == 64)  return {19, 10'000'000'000'000'000'000};
+
+        break;
+
+    case 2:
+        if(type_bit_size == 64)
+            type_bit_size = 63;
+
+        return {(type_bit_size - 1), 1ull << (type_bit_size - 1)};
+
+    case 16:
+        return {(type_bit_size - 1)/4, 1ull << (((type_bit_size - 1)/4) * 4)};
+    }
+
+    size_t current = 1;
+    size_t power = 0;
+    if(type_bit_size < 64)
+    {
+        size_t max = 1ull << type_bit_size;
+        while(true)
+        {
+            size_t next = current * base;
+            if(next >= max)
+                break;
+
+            current = next;
+            power ++;
+        }
+    }
+    else if(type_bit_size == 64)
+    {
+        while(true)
+        {
+            size_t next = current * base;
+            if(next <= current)
+                break;
+
+            current = next;
+            power ++;
+        }
+    }
+
+    return {power, current};
+}
+
+
 runtime_func size_to_fit_base(double from_base, double from_size, double to_base) -> double
 {
     //const double max_from = pow(from_base, from_size);
@@ -2448,8 +2518,14 @@ runtime_func size_to_fit_base(double from_base, double from_size, double to_base
 template <typename Num>
 runtime_func required_size_to_base(size_t num_size, size_t to_base) -> size_t
 {
-    double in_one_digit = round(pow(2, BIT_SIZE<Num>));
-    return cast(size_t) ceil(size_to_fit_base(in_one_digit, cast(double) num_size, cast(double) to_base));
+    Power_And_Powed highest = highest_power_of_in_type(HALF_BIT_SIZE<Num>, to_base); 
+    
+    //into a single digit fits `power` powers of to_base
+    // => we need to `power + 1` to_base to represent any number of the digit
+    // => into the whole number fit `num_size * power` powers
+    // => we need `num_size * (power + 1)` digits
+    //@TODO: why do we need the +highest.power?
+    return num_size * 2 * (highest.power + 1) +highest.power;
 }
 
 //what is the size of the output buffer when converting from base rep to number?
@@ -2462,7 +2538,6 @@ runtime_func required_size_from_base(size_t represenation_size, size_t from_base
     size_t digits = (max_bits + BIT_SIZE<Num> - 1) / BIT_SIZE<Num>;
     return digits;
 }
-
 
 struct To_Base_State
 {
@@ -2477,7 +2552,6 @@ struct To_Base_Result
     To_Base_State state;
     bool finished = true;
 };
-
 
 template <typename Num>
 func to_base_init(Slice<const Num> num) -> To_Base_State
@@ -2535,7 +2609,6 @@ proc to_base(Slice<Rep>* rep, Slice<Num>* temp, Slice<const Num> num, Num base, 
     using Converted = decltype(conversion(cast(Num) 0));
     static_assert(std::is_same_v<Converted, Rep>);
 
-
     if constexpr(std::is_same_v<Num, Rep>)
         assert(check_are_aliasing<Num>(num, *rep) == false);
 
@@ -2556,32 +2629,45 @@ proc to_base(Slice<Rep>* rep, Slice<Num>* temp, Slice<const Num> num, Num base, 
     if(num.size == 0)
         return trim(*rep, 0);
 
+
+    Power_And_Powed highest = highest_power_of_in_type(HALF_BIT_SIZE<Num>, base);
+    assert(highest.powed > 1);
+
     //convert
     Slice<Num> val_left = *temp;
     while(true)
     {
         const Slice<const Num> curr_div_from = is_first ? num : val_left;
+        //if(curr_div_from.size == 0)
+        //break;
 
-        if(curr_div_from.size == 0)
+        Batch_Overflow<Num> res = div_overflow_low_batch<Num>(&val_left, curr_div_from, cast(Num) highest.powed, optims);
+        Num highest_power_rem = res.overflow;
+        val_left = striped_trailing_zeros(val_left);
+
+        if(curr_div_from.size == 0 && highest_power_rem == 0)
             break;
 
-        let res = div_overflow_low_batch<Num>(&val_left, curr_div_from, base, optims);
-        val_left = striped_trailing_zeros(val_left);
-        let digit = conversion(res.overflow);
-        (*rep)[to_size] = digit;
-        to_size++;
+        for(size_t j = 0; j < highest.power; j++)
+        {
+            Num rem = highest_power_rem % base;
+            Rep digit = conversion(rem);
+            (*rep)[to_size] = digit;
+            to_size++;
+
+            highest_power_rem /= base;
+        }
 
         is_first = false;
     }
 
 
     //finish
-    Slice<Rep> converted = trim(*rep, to_size);
+    Slice<Rep> converted = striped_trailing_zeros(trim(*rep, to_size));
     assert(is_striped_number(converted));
     reverse(&converted);
     return converted;
 }
-
 
 struct From_Base_State
 {
@@ -2734,11 +2820,15 @@ proc from_base(Slice<Num>* num, Slice<const Rep> rep, Num base, Conversion_Fn co
         assert(at_least <= num->size && "there must be enough size num represent the number even in the worst case scenario");
     }
 
+    //size_t highest_power = highest_power_of_in_type(BIT_SIZE<Num>, base);
+    //assert(highest_power > 1);
+
     null_n(num->data, num->size);
 
     size_t from_size = sizeof(Rep);
     size_t to_size = sizeof(Num);
 
+    //while(true)
     for(size_t i = 0; i < rep.size; i++)
     {
         Num digit = conversion(rep[i]);
@@ -2747,11 +2837,42 @@ proc from_base(Slice<Num>* num, Slice<const Rep> rep, Num base, Conversion_Fn co
         Slice<Num> added = {&digit, 1};
         let mul_res = mul_overflow_batch<Num>(num, *num, base, optims);
         let add_res = add_overflow_batch<Num>(num, *num, digit, Op_Location::IN_PLACE);
-        //let add_res = add_overflow_batch<Num>(num, *num, added, Op_Location::IN_PLACE);
 
         assert(add_res.overflow == 0);
         assert(mul_res.overflow == 0);
     }
 
     return striped_trailing_zeros(*num);
+}
+
+template <typename T>
+proc factorial(Slice<T>* out, size_t of_value, Optim_Info const& optims) -> Slice<T>
+{
+    assert(high_bits(cast(T) of_value) == 0 && "only 'small' factorials supported! with naive algorhitm");
+
+    size_t highest_possible_native = 1;
+    bool did_finish = true;
+    size_t factor = 2;
+    for(; factor <= of_value; factor++)
+    {
+        size_t next = highest_possible_native * factor;
+        if(next < highest_possible_native)
+        {
+            did_finish = false;
+            break;
+        }
+
+        highest_possible_native = next; 
+    }
+
+    Slice<T> current_value = from_number(out, highest_possible_native);
+
+    if(did_finish)
+        return current_value;
+
+
+    for(; factor <= of_value; factor++)
+        current_value = mul<T>(out, current_value, cast(T) factor, optims);
+
+    return current_value;
 }
