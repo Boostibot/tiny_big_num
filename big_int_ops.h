@@ -2033,8 +2033,6 @@ proc pow_by_squaring(Slice<T>* to, Slice<T>* aux, Slice<const T> num, size_t pow
             return mul<T>(to, aux, num, num, optims);
     }
 
-    assert(aux->size >= required_size*3);
-
     Slice<T> output_aux1 = *to;
     Slice<T> output_aux2 = trim(*aux, required_size);
     
@@ -2224,6 +2222,31 @@ func root_required_aux_size(size_t num_bit_size, size_t root, size_t single_digi
 }
 
 
+u64 iroot_shifting(u64 x, u64 n)
+{
+    if(n == 0)
+        return 1;
+    if (x <= 1) 
+        return x;
+
+    u64 r = 1;
+    u64 s = ((find_last_set_bit(x) / n) * n);
+
+    while(true)
+    {
+        if(s < n) //fast
+            break;
+
+        s -= n; //fast
+        r <<= 1; //O(n)
+        u64 power = ipow_squares(r | 1, n); //slow
+        u64 bit = power <= (x >> s);
+        r |= bit;
+    }
+
+    return r;
+}
+
 u64 iroot_newton(u64 of_value, u64 power)
 {
     const u64 x = of_value; 
@@ -2306,7 +2329,7 @@ proc root(Slice<T>* to, Slice<T>* aux, Slice<const T> num, size_t root, Optim_In
 
     if(num.size == 1)
     {
-        to->data[0] = cast(T) iroot_newton(cast(u64) num[0], cast(u64) root);
+        to->data[0] = cast(T) iroot_shifting(cast(u64) num[0], cast(u64) root);
         return trim(*to, 1);
     }
     size_t estimate_bit_size = root_estimate_bit_size(num_bit_size, root);

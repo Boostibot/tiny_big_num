@@ -13,6 +13,8 @@
 
 #define USE_CUSTOM_LIB
 
+#include "jot/meta.h"
+
 #ifdef USE_CUSTOM_LIB
 #include "jot/stack.h"
 #include "jot/allocator_stack.h"
@@ -27,7 +29,7 @@
 namespace test
 {
 
-    using Unsigned_Max = u64;
+    using umax = u64;
     using std::size;
     using std::data;
 
@@ -110,9 +112,9 @@ namespace test
     }
 
     template<typename T>
-    func make_vector_of_digits(Unsigned_Max val, Memory_Resource* resource) -> Vector<T>
+    func make_vector_of_digits(umax val, Memory_Resource* resource) -> Vector<T>
     {
-        constexpr size_t count = digits_to_represent<T, Unsigned_Max>();
+        constexpr size_t count = digits_to_represent<T, umax>();
         Vector<T> vec = make_sized_vector<T>(count, resource);
         Slice<T> slice = to_slice(&vec);
         Slice<T> converted_slice = from_number<T>(&slice, val);
@@ -130,9 +132,9 @@ namespace test
     };
 
     template <typename T>
-    func make_padded_vector_of_digits(Unsigned_Max val, Memory_Resource* resource, size_t pref_size = 1, size_t post_size = 1) -> Padded_Vector<T>
+    func make_padded_vector_of_digits(umax val, Memory_Resource* resource, size_t pref_size = 1, size_t post_size = 1) -> Padded_Vector<T>
     {
-        constexpr size_t count = digits_to_represent<T, Unsigned_Max>();
+        constexpr size_t count = digits_to_represent<T, umax>();
         size_t total_size = pref_size + count + post_size;
 
         Padded_Vector<T> padded;
@@ -166,14 +168,14 @@ namespace test
     using Random_Generator = std::mt19937;
     struct Batch_Op_Result
     {
-        Unsigned_Max value;
-        Unsigned_Max overflow;
+        umax value;
+        umax overflow;
 
         bool constexpr operator ==(Batch_Op_Result const&) const noexcept = default;
     };
 
     template <typename T>
-    constexpr size_t MAX_TYPE_SIZE_FRACTION = sizeof(Unsigned_Max) / sizeof(T);
+    constexpr size_t MAX_TYPE_SIZE_FRACTION = sizeof(umax) / sizeof(T);
 
     constexpr size_t RELEASE_MEMORY_EVERY = 10;
 
@@ -217,7 +219,7 @@ namespace test
 
     };
 
-    template <typename T, typename ReturnT = Unsigned_Max>
+    template <typename T, typename ReturnT = umax>
     runtime_func make_exponential_distribution(ReturnT min = 0, ReturnT max = std::numeric_limits<ReturnT>::max()) -> Uniform_Exponential_Distribution<ReturnT>
     {
         double quot = pow(2, BIT_SIZE<T>);
@@ -275,30 +277,6 @@ namespace test
         return res;
     }
 
-    u64 iroot_shifting(u64 x, u64 n)
-    {
-        if(n == 0)
-            return 1;
-        if (x <= 1) 
-            return x;
-
-        u64 r = 1;
-        u64 s = ((find_last_set_bit(x) / n) * n);
-
-        while(true)
-        {
-            if(s < n) //fast
-                break;
-
-            s -= n; //fast
-            r <<= 1; //O(n)
-            u64 power = ipow_squares(r | 1, n); //slow
-            u64 bit = power <= (x >> s);
-            r |= bit;
-        }
-
-        return r;
-    }
 
     u64 ilog_heyley(u64 of_value, u64 base)
     {
@@ -389,39 +367,39 @@ namespace test
 
     runtime_proc test_misc(Random_Generator* generator, size_t random_runs)
     {
-        using Max = Unsigned_Max;
+        using umax = umax;
 
-        assert(find_last_set_bit<Max>(0) == 0);
-        assert(find_last_set_bit<Max>(1) == 0);
-        assert(find_last_set_bit<Max>(2) == 1);
-        assert(find_last_set_bit<Max>(3) == 1);
-        assert(find_last_set_bit<Max>(4) == 2);
-        assert(find_last_set_bit<Max>(7) == 2);
-        assert(find_last_set_bit<Max>(8) == 3);
-        assert(find_last_set_bit<Max>(76) == 6);
-        assert(find_last_set_bit<Max>(513) == 9);
-        assert(find_last_set_bit<Max>(641) == 9);
-        assert(find_last_set_bit<Max>(1024) == 10);
+        assert(find_last_set_bit<umax>(0) == 0);
+        assert(find_last_set_bit<umax>(1) == 0);
+        assert(find_last_set_bit<umax>(2) == 1);
+        assert(find_last_set_bit<umax>(3) == 1);
+        assert(find_last_set_bit<umax>(4) == 2);
+        assert(find_last_set_bit<umax>(7) == 2);
+        assert(find_last_set_bit<umax>(8) == 3);
+        assert(find_last_set_bit<umax>(76) == 6);
+        assert(find_last_set_bit<umax>(513) == 9);
+        assert(find_last_set_bit<umax>(641) == 9);
+        assert(find_last_set_bit<umax>(1024) == 10);
         assert(find_last_set_bit<u64>(0xf4f1f63db9b7e800) == 63);
-        assert(find_last_set_bit<Max>(0b010100) == 4);
-        assert(find_last_set_bit<Max>(0b010000) == 4);
+        assert(find_last_set_bit<umax>(0b010100) == 4);
+        assert(find_last_set_bit<umax>(0b010000) == 4);
 
-        assert(find_first_set_bit<Max>(0) == 0);
-        assert(find_first_set_bit<Max>(0b000001) == 0);
-        assert(find_first_set_bit<Max>(0b010100) == 2);
-        assert(find_first_set_bit<Max>(0b010101) == 0);
-        assert(find_first_set_bit<Max>(0b010000) == 4);
-        assert(find_first_set_bit<Max>(0b010100) == 2);
-        assert(find_first_set_bit<Max>(0b010010) == 1);
+        assert(find_first_set_bit<umax>(0) == 0);
+        assert(find_first_set_bit<umax>(0b000001) == 0);
+        assert(find_first_set_bit<umax>(0b010100) == 2);
+        assert(find_first_set_bit<umax>(0b010101) == 0);
+        assert(find_first_set_bit<umax>(0b010000) == 4);
+        assert(find_first_set_bit<umax>(0b010100) == 2);
+        assert(find_first_set_bit<umax>(0b010010) == 1);
 
-        assert(pop_count<Max>(0b0000'0000) == 0);
-        assert(pop_count<Max>(0b0000'0001) == 1);
-        assert(pop_count<Max>(0b1000'0000) == 1);
-        assert(pop_count<Max>(0b1010'0000) == 2);
-        assert(pop_count<Max>(0b1010'0011) == 4);
-        assert(pop_count<Max>(0b0111'1111) == 7);
-        assert(pop_count<Max>(cast(u32) -1) == 32);
-        assert(pop_count<Max>(cast(Max) -1) == 64);
+        assert(pop_count<umax>(0b0000'0000) == 0);
+        assert(pop_count<umax>(0b0000'0001) == 1);
+        assert(pop_count<umax>(0b1000'0000) == 1);
+        assert(pop_count<umax>(0b1010'0000) == 2);
+        assert(pop_count<umax>(0b1010'0011) == 4);
+        assert(pop_count<umax>(0b0111'1111) == 7);
+        assert(pop_count<umax>(cast(u32) -1) == 32);
+        assert(pop_count<umax>(cast(umax) -1) == 64);
 
         assert(high_mask<u8>() == 0xF0);
         assert(high_mask<u8>(2) == 0b1111'1100);
@@ -573,7 +551,7 @@ namespace test
     runtime_proc test_add_overflow(Memory_Resource* memory, Random_Generator* generator, size_t random_runs)
     {
         using Res = Batch_Op_Result;
-        using Max = Unsigned_Max;
+        using umax = umax;
         using Vector = Vector<T>;
         using Padded = Padded_Vector<T>;
         using CSlice = Slice<const T>;
@@ -581,7 +559,7 @@ namespace test
 
         Memory_Resource* resource = memory;
 
-        runtime_proc test_add_overflow_batch = [&](Max left_, Max right_, Max carry_in, Res expected, bool check_overflow = true) -> bool {
+        runtime_proc test_add_overflow_batch = [&](umax left_, umax right_, umax carry_in, Res expected, bool check_overflow = true) -> bool {
             Vector left = make_vector_of_digits<T>(left_, resource);
             Vector right = make_vector_of_digits<T>(right_, resource);
             Vector out = make_sized_vector<T>(MAX_TYPE_SIZE_FRACTION<T> + 1, resource);
@@ -639,25 +617,25 @@ namespace test
             return outputs_match && overflows_match && sizes_match;
         };
     
-        runtime_proc auto_test_add = [&](Max left, Max right, Max carry_in = 0) -> bool {
-            Max highest_one = cast(Max) 1 << (BIT_SIZE<Max> - 1);
-            Max adjusted_left = left & ~highest_one;
-            Max adjusted_right = right & ~highest_one;
-            Max adjusted_carry = cast(Max) low_bits(cast(T) carry_in);
-            Max expected = add_no_overflow(adjusted_left, adjusted_right, adjusted_carry);
+        runtime_proc auto_test_add = [&](umax left, umax right, umax carry_in = 0) -> bool {
+            umax highest_one = cast(umax) 1 << (BIT_SIZE<umax> - 1);
+            umax adjusted_left = left & ~highest_one;
+            umax adjusted_right = right & ~highest_one;
+            umax adjusted_carry = cast(umax) low_bits(cast(T) carry_in);
+            umax expected = add_no_overflow(adjusted_left, adjusted_right, adjusted_carry);
 
             return test_add_overflow_batch(adjusted_left, adjusted_right, adjusted_carry, Res{expected, 0}, false);
         };
 
-        runtime_proc test_single_add = [&](Max left, Max single){
+        runtime_proc test_single_add = [&](umax left, umax single){
             if(left == 0 || single == 0)
                 return true;
 
-            Max highest_one = cast(Max) 1 << (BIT_SIZE<Max> - 1);
-            Max adjusted_left = left & ~highest_one;
+            umax highest_one = cast(umax) 1 << (BIT_SIZE<umax> - 1);
+            umax adjusted_left = left & ~highest_one;
             T adjusted_single = cast(T) (single & ~highest_one);
 
-            Max expected = adjusted_left + adjusted_single;
+            umax expected = adjusted_left + adjusted_single;
 
             mut left1 = make_vector_of_digits<T>(adjusted_left, resource); 
             mut left2 = make_vector_of_digits<T>(adjusted_left, resource);
@@ -708,9 +686,9 @@ namespace test
         let distribution = make_exponential_distribution<T>();
         for(size_t i = 0; i < random_runs; i++)
         {
-            Max left = distribution(*generator);
-            Max right = distribution(*generator);
-            Max carry = distribution(*generator);
+            umax left = distribution(*generator);
+            umax right = distribution(*generator);
+            umax carry = distribution(*generator);
             assert(auto_test_add(left, right, carry));
             assert(test_single_add(left, cast(T) right));
         };
@@ -721,7 +699,7 @@ namespace test
     runtime_proc test_sub_overflow(Memory_Resource* memory, Random_Generator* generator, size_t random_runs)
     {
         using Res = Batch_Op_Result;
-        using Max = Unsigned_Max;
+        using umax = umax;
         using Vector = Vector<T>;
         using Padded = Padded_Vector<T>;
         using CSlice = Slice<const T>;
@@ -729,7 +707,7 @@ namespace test
 
         Memory_Resource* resource = memory;
 
-        runtime_proc test_sub_overflow_batch = [&](Max left_, Max right_, Max carry_in, Res expected, bool check_overflow = true) -> bool {
+        runtime_proc test_sub_overflow_batch = [&](umax left_, umax right_, umax carry_in, Res expected, bool check_overflow = true) -> bool {
             Vector left = make_vector_of_digits<T>(left_, resource);
             Vector right = make_vector_of_digits<T>(right_, resource);
             Vector out = make_sized_vector<T>(MAX_TYPE_SIZE_FRACTION<T> + 1, resource);
@@ -764,19 +742,19 @@ namespace test
             return outputs_match && overflows_match && sizes_match;
         };
 
-        runtime_proc auto_test_sub = [&](Max left, Max right, Max carry_in = 0) -> bool {
+        runtime_proc auto_test_sub = [&](umax left, umax right, umax carry_in = 0) -> bool {
             if(left < right)
                 std::swap(left, right);
 
-            Max highest_one = cast(Max) 1 << (BIT_SIZE<Max> - 1);
-            Max adjusted_right = right & ~highest_one;
-            Max adjusted_carry = carry_in > low_mask<Max>();
+            umax highest_one = cast(umax) 1 << (BIT_SIZE<umax> - 1);
+            umax adjusted_right = right & ~highest_one;
+            umax adjusted_carry = carry_in > low_mask<umax>();
 
-            Max adjusted_left = left;
+            umax adjusted_left = left;
             if(left < adjusted_carry + adjusted_right)
                 adjusted_left = add_no_overflow(left, adjusted_carry);
 
-            Max expected = adjusted_left - adjusted_right - adjusted_carry;
+            umax expected = adjusted_left - adjusted_right - adjusted_carry;
             return test_sub_overflow_batch(adjusted_left, adjusted_right, adjusted_carry, Res{expected, 0});
         };
 
@@ -814,9 +792,9 @@ namespace test
         let distribution = make_exponential_distribution<T>();
         for(size_t i = 0; i < random_runs; i++)
         {
-            Max left = distribution(*generator);
-            Max right = distribution(*generator);
-            Max carry = distribution(*generator);
+            umax left = distribution(*generator);
+            umax right = distribution(*generator);
+            umax carry = distribution(*generator);
             assert(auto_test_sub(left, right, carry));
         };
     }
@@ -825,7 +803,7 @@ namespace test
     runtime_proc test_complement_overflow(Memory_Resource* memory, Random_Generator* generator, size_t random_runs)
     {
         using Res = Batch_Op_Result;
-        using Max = Unsigned_Max;
+        using umax = umax;
         using Vector = Vector<T>;
         using Padded = Padded_Vector<T>;
         using CSlice = Slice<const T>;
@@ -834,7 +812,7 @@ namespace test
         Memory_Resource* resource = memory;
 
         //we dont test oveflow of this op 
-        runtime_proc complement_overflow_batch = [&](Max left_, Max carry_in = 1) -> Max{
+        runtime_proc complement_overflow_batch = [&](umax left_, umax carry_in = 1) -> umax{
             Padded pad_left = make_padded_vector_of_digits<T>(left_, resource, 1);
             Vector out = make_sized_vector<T>(MAX_TYPE_SIZE_FRACTION<T> + 1, resource);
 
@@ -857,25 +835,25 @@ namespace test
         };
 
 
-        runtime_proc auto_test_complement = [&](Max left, Max carry_in = 1) -> bool{
-            Max complemented = ~left + carry_in;
-            Max cropped_complemented = complemented;
+        runtime_proc auto_test_complement = [&](umax left, umax carry_in = 1) -> bool{
+            umax complemented = ~left + carry_in;
+            umax cropped_complemented = complemented;
 
             size_t bits = 0;
             if(left == 0)
                 bits = 0;
-            else if(BIT_SIZE<T> >= BIT_SIZE<Max>)
-                bits = BIT_SIZE<Max>;
+            else if(BIT_SIZE<T> >= BIT_SIZE<umax>)
+                bits = BIT_SIZE<umax>;
             else
             {
-                for(Max temp_left = left; temp_left > 0;)
+                for(umax temp_left = left; temp_left > 0;)
                 {
                     temp_left >>= BIT_SIZE<T>;
                     bits += BIT_SIZE<T>;
                 }
             }
         
-            if(bits < BIT_SIZE<Max>)
+            if(bits < BIT_SIZE<umax>)
                 cropped_complemented = low_bits(complemented, bits);
 
             return complement_overflow_batch(left, carry_in) == cropped_complemented;
@@ -891,12 +869,12 @@ namespace test
             assert(complement_overflow_batch(0xFFFF0000) == cast(u32)(-cast(i64)0xFFFF0000));
         }
 
-        let exponential = make_exponential_distribution<T, Max>();
+        let exponential = make_exponential_distribution<T, umax>();
         let uniform = std::uniform_int_distribution<>(0, 1);
         for(size_t i = 0; i < random_runs; i++)
         {
-            Max left = exponential(*generator);
-            Max carry = uniform(*generator);
+            umax left = exponential(*generator);
+            umax carry = uniform(*generator);
             assert(auto_test_complement(left, carry));
         };
     }
@@ -905,7 +883,7 @@ namespace test
     runtime_proc test_shift_overflow(Memory_Resource* memory, Random_Generator* generator, size_t random_runs)
     {
         using Res = Batch_Op_Result;
-        using Max = Unsigned_Max;
+        using umax = umax;
         using Vector = Vector<T>;
         using Padded = Padded_Vector<T>;
         using CSlice = Slice<const T>;
@@ -913,7 +891,7 @@ namespace test
 
         Memory_Resource* resource = memory;
 
-        runtime_proc shift_both = [&](Max left_, Max right, Max carry_in, bool up_down, Iter_Direction direction) -> Batch_Op_Result{
+        runtime_proc shift_both = [&](umax left_, umax right, umax carry_in, bool up_down, Iter_Direction direction) -> Batch_Op_Result{
             Padded pad_left = make_padded_vector_of_digits<T>(left_, resource, 1);
             Vector out = make_sized_vector<T>(MAX_TYPE_SIZE_FRACTION<T> + 1, resource);
 
@@ -951,7 +929,7 @@ namespace test
             return Batch_Op_Result{num1, res1.overflow};
         };
 
-        runtime_proc shift_up_overflow_batch = [&](Max left, Max right, Max carry_in = 0) -> Batch_Op_Result{
+        runtime_proc shift_up_overflow_batch = [&](umax left, umax right, umax carry_in = 0) -> Batch_Op_Result{
             let forward = shift_both(left, right, carry_in, true, Iter_Direction::FORWARD);
             let backward = shift_both(left, right, carry_in, true, Iter_Direction::BACKWARD);
 
@@ -961,7 +939,7 @@ namespace test
             return forward;
         };
 
-        runtime_proc shift_down_overflow_batch = [&](Max left, Max right, Max carry_in = 0) -> Batch_Op_Result{
+        runtime_proc shift_down_overflow_batch = [&](umax left, umax right, umax carry_in = 0) -> Batch_Op_Result{
             let forward = shift_both(left, right, carry_in, false, Iter_Direction::FORWARD);
             let backward = shift_both(left, right, carry_in, false, Iter_Direction::BACKWARD);
 
@@ -1010,17 +988,17 @@ namespace test
 
     struct Adjusted
     {
-        Unsigned_Max left;
-        Unsigned_Max right;
+        umax left;
+        umax right;
     };
 
-    runtime_func adjust_to_not_mul_overflow(Unsigned_Max left, Unsigned_Max right) -> Adjusted
+    runtime_func adjust_to_not_mul_overflow(umax left, umax right) -> Adjusted
     {
-        using Max = Unsigned_Max;
+        using umax = umax;
         // (by doing find_last_set_bit) and then shifting it so that they will not overflow
 
-        Max adjusted_left = left;
-        Max adjusted_right = right;
+        umax adjusted_left = left;
+        umax adjusted_right = right;
 
         size_t log_left = find_last_set_bit(left) + 1; 
         size_t log_right = find_last_set_bit(right) + 1; 
@@ -1030,16 +1008,16 @@ namespace test
         size_t combined_log = log_left + log_right;
 
         //if can overflow we shift down so that its not possible
-        if(combined_log > BIT_SIZE<Max>)
+        if(combined_log > BIT_SIZE<umax>)
         {
-            size_t diff = combined_log - BIT_SIZE<Max>;
+            size_t diff = combined_log - BIT_SIZE<umax>;
             size_t shift = (diff + 1) / 2;
 
             adjusted_left >>= shift;
             adjusted_right >>= shift;
         }
 
-        assert(find_last_set_bit(adjusted_left) + find_last_set_bit(adjusted_right) + 2 <= BIT_SIZE<Max>);
+        assert(find_last_set_bit(adjusted_left) + find_last_set_bit(adjusted_right) + 2 <= BIT_SIZE<umax>);
         return {adjusted_left, adjusted_right};
     }
 
@@ -1047,7 +1025,7 @@ namespace test
     runtime_proc test_mul_overflow(Memory_Resource* memory, Random_Generator* generator, size_t random_runs, size_t controlled_runs)
     {
         using Res = Batch_Op_Result;
-        using Max = Unsigned_Max;
+        using umax = umax;
         using Vector = Vector<T>;
         using Padded = Padded_Vector<T>;
         using CSlice = Slice<const T>;
@@ -1055,7 +1033,7 @@ namespace test
 
         Memory_Resource* resource = memory;
 
-        runtime_proc test_mul_overflow_batch = [&](Max left_, Max right, Max carry_in, Res expected, Optim_Info optims, bool check_overflow = true) -> bool {
+        runtime_proc test_mul_overflow_batch = [&](umax left_, umax right, umax carry_in, Res expected, Optim_Info optims, bool check_overflow = true) -> bool {
             Padded pad_left = make_padded_vector_of_digits<T>(left_, resource, 1);
             Vector out = make_sized_vector<T>(MAX_TYPE_SIZE_FRACTION<T> + 1, resource);
 
@@ -1095,7 +1073,7 @@ namespace test
             return outputs_match && overflows_match && sizes_match;
         };
 
-        runtime_proc auto_test_mul = [&](Max left, Max right, Optim_Info optims) -> bool
+        runtime_proc auto_test_mul = [&](umax left, umax right, Optim_Info optims) -> bool
         {
             let adjusted = adjust_to_not_mul_overflow(left, right);
             return test_mul_overflow_batch(adjusted.left, adjusted.right, 0, Res{adjusted.left * adjusted.right, 0}, optims, false);
@@ -1128,12 +1106,12 @@ namespace test
 
         assert(auto_test_mul(0x14156f, 0x3c, Optim_Info{}));
 
-        let exponential = make_exponential_distribution<T, Max>();
+        let exponential = make_exponential_distribution<T, umax>();
         let uniform = std::uniform_int_distribution<long long>(0, FULL_MASK<T> >> 1);
         for(size_t i = 0; i < random_runs; i++)
         {
-            Max left = exponential(*generator);
-            Max right = uniform(*generator);
+            umax left = exponential(*generator);
+            umax right = uniform(*generator);
             let optims = generate_random_optims(generator);
             assert(auto_test_mul(left, right, optims));
         };
@@ -1143,7 +1121,7 @@ namespace test
     runtime_proc test_div_overflow_low(Memory_Resource* memory, Random_Generator* generator, size_t random_runs, size_t controlled_runs)
     {
         using Res = Batch_Op_Result;
-        using Max = Unsigned_Max;
+        using umax = umax;
         using Vector = Vector<T>;
         using Padded = Padded_Vector<T>;
         using CSlice = Slice<const T>;
@@ -1153,7 +1131,7 @@ namespace test
 
         Memory_Resource* resource = memory;
 
-        runtime_proc test_div_overflow_low_batch = [&](Max left_, Max right, Max carry_in, Res expected, Optim_Info optims) -> bool {
+        runtime_proc test_div_overflow_low_batch = [&](umax left_, umax right, umax carry_in, Res expected, Optim_Info optims) -> bool {
             constexpr size_t padding_before = 2;
 
             Padded pad_left = make_padded_vector_of_digits<T>(left_, resource, 1);
@@ -1182,13 +1160,13 @@ namespace test
             return outputs_match && overflows_match && sizes_match;
         };
     
-        runtime_proc auto_test_div = [&](Max left, Max right, Optim_Info optims) -> bool {
+        runtime_proc auto_test_div = [&](umax left, umax right, Optim_Info optims) -> bool {
             if(right == 0)
                 return true;
         
-            Max adjusted_right = low_bits(cast(T) right);
-            Max res = left / adjusted_right;
-            Max rem = left % adjusted_right;
+            umax adjusted_right = low_bits(cast(T) right);
+            umax res = left / adjusted_right;
+            umax rem = left % adjusted_right;
 
             //carry in is basically added as an extra digit to the divided number
             // its entire purpose is linking multiple div blocks if desired (ie we store number chunked for some reason)
@@ -1225,12 +1203,12 @@ namespace test
             }
         }
 
-        let exponential = make_exponential_distribution<T, Max>();
+        let exponential = make_exponential_distribution<T, umax>();
         let uniform = std::uniform_int_distribution<long long>(0, low_mask<T>());
         for(size_t i = 0; i < random_runs; i++)
         {
-            Max left = exponential(*generator);
-            Max right = uniform(*generator);
+            umax left = exponential(*generator);
+            umax right = uniform(*generator);
             let optims = generate_random_optims(generator);
             assert(auto_test_div(left, right, optims));
         };
@@ -1240,7 +1218,7 @@ namespace test
     runtime_proc test_mul_quadratic(Memory_Resource* memory, Random_Generator* generator, size_t random_runs)
     {
         using Res = Batch_Op_Result;
-        using Max = Unsigned_Max;
+        using umax = umax;
         using Vector = Vector<T>;
         using Padded = Padded_Vector<T>;
         using CSlice = Slice<const T>;
@@ -1248,7 +1226,7 @@ namespace test
 
         Memory_Resource* resource = memory;
 
-        runtime_proc test_fused_mul_add = [&](Max left_, Max right_, Max coef, Max expected, Optim_Info optims = Optim_Info{}) -> bool{
+        runtime_proc test_fused_mul_add = [&](umax left_, umax right_, umax coef, umax expected, Optim_Info optims = Optim_Info{}) -> bool{
             Vector left = make_vector_of_digits<T>(left_, resource);
             Vector right = make_vector_of_digits<T>(right_, resource);
             Vector output = make_sized_vector<T>(size(left), resource);
@@ -1272,11 +1250,11 @@ namespace test
             return expected == num_out && expected == num_in; 
         };
 
-        runtime_proc auto_test_fused_mul_add = [&](Max left, Max right, Max coef, Optim_Info optims = Optim_Info{}) -> bool{
+        runtime_proc auto_test_fused_mul_add = [&](umax left, umax right, umax coef, Optim_Info optims = Optim_Info{}) -> bool{
             return test_fused_mul_add(left, right, coef, left + coef*right, optims);
         };
 
-        runtime_proc test_mul_quadratic = [&](Max left_, Max right_, Max expected, Optim_Info optims = Optim_Info{}) -> bool{
+        runtime_proc test_mul_quadratic = [&](umax left_, umax right_, umax expected, Optim_Info optims = Optim_Info{}) -> bool{
             Vector left = make_vector_of_digits<T>(left_, resource);
             Vector right = make_vector_of_digits<T>(right_, resource);
 
@@ -1306,7 +1284,7 @@ namespace test
             return expected == normal && expected == fused && expected == karatsuba;
         };
 
-        runtime_proc auto_test_mul_quadratic = [&](Max left, Max right, Optim_Info optims) -> bool
+        runtime_proc auto_test_mul_quadratic = [&](umax left, umax right, Optim_Info optims) -> bool
         {
             let adjusted = adjust_to_not_mul_overflow(left, right);
             return test_mul_quadratic(adjusted.left, adjusted.right, adjusted.left * adjusted.right, optims);
@@ -1354,8 +1332,8 @@ namespace test
         for(size_t i = 0; i < random_runs; i++)
         {
             Optim_Info optims = generate_random_optims(generator);
-            Max left = distribution(*generator);
-            Max right = distribution(*generator);
+            umax left = distribution(*generator);
+            umax right = distribution(*generator);
 
             assert(auto_test_mul_quadratic(left, right, optims));
         };
@@ -1365,7 +1343,7 @@ namespace test
     runtime_proc test_div_bit_by_bit(Memory_Resource* memory, Random_Generator* generator, size_t random_runs)
     {
         using Res = Batch_Op_Result;
-        using Max = Unsigned_Max;
+        using umax = umax;
         using Vector = Vector<T>;
         using Padded = Padded_Vector<T>;
         using CSlice = Slice<const T>;
@@ -1379,7 +1357,7 @@ namespace test
 
         Memory_Resource* resource = memory;
 
-        runtime_proc test_div_bit_by_bit = [&](Max num_, Max den_, Max ex_quotient, Max ex_remainder, Will_Fail expected_fail = OKAY, Optim_Info optims = Optim_Info{}) -> bool{
+        runtime_proc test_div_bit_by_bit = [&](umax num_, umax den_, umax ex_quotient, umax ex_remainder, Will_Fail expected_fail = OKAY, Optim_Info optims = Optim_Info{}) -> bool{
             Vector num = make_vector_of_digits<T>(num_, resource); 
             Vector den = make_vector_of_digits<T>(den_, resource);
             size_t quo_size = required_div_quotient_size(size(num), size(den));
@@ -1404,12 +1382,12 @@ namespace test
         };
 
 
-        runtime_proc auto_test_div_bit_by_bit = [&](Max left, Max right, Optim_Info optims = Optim_Info{}) -> bool{
+        runtime_proc auto_test_div_bit_by_bit = [&](umax left, umax right, Optim_Info optims = Optim_Info{}) -> bool{
             if(right == 0)
                 return test_div_bit_by_bit(left, right, 0, 0, FAIL);
 
-            Max quotient = left / right;
-            Max remainder = left % right;
+            umax quotient = left / right;
+            umax remainder = left % right;
             return test_div_bit_by_bit(left, right, quotient, remainder, OKAY, optims);
         };
 
@@ -1445,8 +1423,8 @@ namespace test
         for(size_t i = 0; i < random_runs; i++)
         {
             Optim_Info optims = generate_random_optims(generator);
-            Unsigned_Max left = distribution(*generator);
-            Unsigned_Max right = distribution(*generator);
+            umax left = distribution(*generator);
+            umax right = distribution(*generator);
             assert(auto_test_div_bit_by_bit(left, right, optims));
         };
     }
@@ -1457,10 +1435,10 @@ namespace test
         std::cout << "[";
         if(slice.size > 0)
         {
-            std::cout << cast(Unsigned_Max) slice[0];
+            std::cout << cast(umax) slice[0];
 
             for(size_t i = 1; i < slice.size; i++)
-                std::cout << ", " << cast(Unsigned_Max) slice[i];
+                std::cout << ", " << cast(umax) slice[i];
         }
         std::cout << "]\n";
     }
@@ -1505,7 +1483,7 @@ namespace test
         return size;
     }
 
-    template <typename Num = Unsigned_Max>
+    template <typename Num = umax>
     func to_base(Slice<const Num> num, Num base, Memory_Resource* resource) -> Vector<char> {
         assert(base > 2);
         assert(base <= 36);
@@ -1525,7 +1503,7 @@ namespace test
         return to_base<Num, char>(num, base, conversion, Optim_Info{}, resource);
     }
 
-    template <typename Num = Unsigned_Max>
+    template <typename Num = umax>
     func from_base(const char* str, Num base, Memory_Resource* resource) -> Trivial_Maybe<Vector<Num>> {
         assert(base > 2);
         assert(base <= 36);
@@ -1626,17 +1604,17 @@ namespace test
     }
 
     template <typename Num, typename Rep>
-    func native_to_base(Unsigned_Max num, Num base, Memory_Resource* resource) -> Vector<Rep> 
+    func native_to_base(umax num, Num base, Memory_Resource* resource) -> Vector<Rep> 
     {
-        using Max = Unsigned_Max;
-        constexpr size_t num_digits = digits_to_represent<Num, Max>();
+        using umax = umax;
+        constexpr size_t num_digits = digits_to_represent<Num, umax>();
         const size_t max_size = required_size_to_base<Num>(num_digits, base);
 
         Vector<Rep> converted = make_sized_vector<Rep>(max_size, resource);
         size_t size = 0;
-        for(Max curr_val = num; curr_val != 0; curr_val /= base, size ++)
+        for(umax curr_val = num; curr_val != 0; curr_val /= base, size ++)
         {
-            Max rem = curr_val % base;
+            umax rem = curr_val % base;
             converted[size] = cast(Rep) rem;
         }
 
@@ -1648,16 +1626,16 @@ namespace test
     };
 
     template <typename Num, typename Rep>
-    func native_from_base(Slice<const Rep> rep, Num base) -> Unsigned_Max 
+    func native_from_base(Slice<const Rep> rep, Num base) -> umax 
     {
-        using Max = Unsigned_Max;
+        using umax = umax;
         assert(is_striped_representation(rep));
 
-        Max value = 0;
+        umax value = 0;
         for(size_t i = 0; i < rep.size; i++)
         {
-            Max muled = value * base;
-            Max added = muled + rep[i];
+            umax muled = value * base;
+            umax added = muled + rep[i];
             assert(muled >= value);
             assert(added >= muled);
 
@@ -1671,7 +1649,7 @@ namespace test
     runtime_proc test_to_base(Memory_Resource* memory, Random_Generator* generator, size_t random_runs)
     {
         static_assert(sizeof(Num) >= sizeof(Rep));
-        using Max = Unsigned_Max;
+        using umax = umax;
 
         Memory_Resource* resource = memory;
 
@@ -1687,14 +1665,14 @@ namespace test
             return is_equal<Rep>(to_slice(converted), expected_rep);
         };
 
-        runtime_proc manual_test_to_base = [&](Max num, Num base, std::initializer_list<Rep> expected_rep, Optim_Info optims = Optim_Info{}) -> bool 
+        runtime_proc manual_test_to_base = [&](umax num, Num base, std::initializer_list<Rep> expected_rep, Optim_Info optims = Optim_Info{}) -> bool 
         {
             Vector<Num> num_ = make_vector_of_digits<Num>(num, resource);
             Slice<const Rep> expected_rep_s = {std::data(expected_rep), std::size(expected_rep)};
             return test_to_base(to_slice(num_), base, expected_rep_s, optims);
         };
 
-        runtime_proc auto_test_to_base = [&](Max num, Num base, Optim_Info optims) -> bool 
+        runtime_proc auto_test_to_base = [&](umax num, Num base, Optim_Info optims) -> bool 
         {
             Vector<Num> num_ = make_vector_of_digits<Num>(num, resource);
             Vector<Rep> expected_rep = native_to_base<Num, Rep>(num, base, resource);
@@ -1711,7 +1689,7 @@ namespace test
             return is_equal<Num>(to_slice(num), expected_num);
         };
 
-        runtime_proc manual_test_from_base = [&](std::initializer_list<Rep> rep, Num base, Max expected_num, Optim_Info optims = Optim_Info{}) -> bool 
+        runtime_proc manual_test_from_base = [&](std::initializer_list<Rep> rep, Num base, umax expected_num, Optim_Info optims = Optim_Info{}) -> bool 
         {
             Vector<Num> expected_num_ = make_vector_of_digits<Num>(expected_num, resource);
             Slice<const Rep> rep_s = {std::data(rep), std::size(rep)};
@@ -1720,12 +1698,12 @@ namespace test
 
         runtime_proc auto_test_from_base = [&](Slice<const Rep> rep, Num base, Optim_Info optims) -> bool 
         {
-            Max num = native_from_base<Num, Rep>(rep, base);
+            umax num = native_from_base<Num, Rep>(rep, base);
             Vector<Num> expected_num = make_vector_of_digits<Num>(num, resource);
             return test_from_base(rep, base, to_slice(expected_num), optims);
         };
 
-        runtime_proc test_to_and_fro = [&](Max value, Num base, Optim_Info optims) -> bool
+        runtime_proc test_to_and_fro = [&](umax value, Num base, Optim_Info optims) -> bool
         {
             Vector<Num> initial = make_vector_of_digits<Num>(value, resource);
             let rep = to_base<Num, Rep>(to_slice(initial), base, id_to_conversion, optims, resource);
@@ -1775,7 +1753,7 @@ namespace test
         for(size_t i = 0; i < random_runs; i++)
         {
             Optim_Info optims = generate_random_optims(generator);
-            Unsigned_Max num = num_dist(*generator);
+            umax num = num_dist(*generator);
             Num base = base_dist(*generator);
 
             assert(auto_test_to_base(num, base, optims));
@@ -1787,7 +1765,7 @@ namespace test
     runtime_proc test_pow(Memory_Resource* memory, Random_Generator* generator, size_t random_runs, size_t controlled_runs)
     {
         using Res = Batch_Op_Result;
-        using Max = Unsigned_Max;
+        using umax = umax;
         using Vector = Vector<T>;
         using Padded = Padded_Vector<T>;
         using CSlice = Slice<const T>;
@@ -1804,7 +1782,7 @@ namespace test
 
         runtime_proc pow_ = [&](CSlice num, size_t pow, Optim_Info optims, Pow_Algorhitm algorhitm) -> Vector {
             size_t required_size = required_pow_to_size(num, pow);
-            size_t aux_size = required_pow_by_squaring_auxiliary_size(num, pow);
+            size_t aux_size = required_pow_by_squaring_auxiliary_size(num, pow)*100 + 100;
             Vector out = make_sized_vector<T>(required_size, resource);
             Vector aux = make_sized_vector<T>(aux_size, resource);
 
@@ -1823,24 +1801,24 @@ namespace test
             return out;
         };
 
-        runtime_proc pow = [&](Max num, size_t pow, Optim_Info optims, Pow_Algorhitm algorhitm) -> Max {
+        runtime_proc pow = [&](umax num, size_t pow, Optim_Info optims, Pow_Algorhitm algorhitm) -> umax {
             Vector num_ = make_vector_of_digits<T>(num, resource);
             Vector powed = pow_(to_slice(num_), pow, optims, algorhitm);
             CSlice powed_s = to_slice(powed);
 
-            Max res = unwrap(to_number(powed_s));
+            umax res = unwrap(to_number(powed_s));
             return res;
         };
 
-        runtime_proc pow_by_squaring = [&](Max num, Max power, Optim_Info optims = Optim_Info{}) -> Max {
+        runtime_proc pow_by_squaring = [&](umax num, umax power, Optim_Info optims = Optim_Info{}) -> umax {
             return pow(num, power, optims, SQUARING);
         };
 
-        runtime_proc trivial_pow = [&](Max num, Max power, Optim_Info optims = Optim_Info{}) -> Max {
+        runtime_proc trivial_pow = [&](umax num, umax power, Optim_Info optims = Optim_Info{}) -> umax {
             return pow(num, power, optims, TRIVIAL);
         };
 
-        runtime_proc optimal_pow = [&](Max num, Max power, Optim_Info optims = Optim_Info{}) -> Max {
+        runtime_proc optimal_pow = [&](umax num, umax power, Optim_Info optims = Optim_Info{}) -> umax {
             return pow(num, power, optims, OPTIMAL);
         };
 
@@ -1902,7 +1880,7 @@ namespace test
     runtime_proc test_root(Memory_Resource* memory, Random_Generator* generator, size_t random_runs, size_t controlled_runs)
     {
         using Res = Batch_Op_Result;
-        using Max = Unsigned_Max;
+        using umax = umax;
         using Vector = Vector<T>;
         using Padded = Padded_Vector<T>;
         using CSlice = Slice<const T>;
@@ -1925,12 +1903,12 @@ namespace test
             return out;
         };
 
-        runtime_proc root = [&](Max num, size_t root, Optim_Info optims = Optim_Info{}) -> Max {
+        runtime_proc root = [&](umax num, size_t root, Optim_Info optims = Optim_Info{}) -> umax {
             Vector num_ = make_vector_of_digits<T>(num, resource);
             Vector rooted = root_(to_slice(num_), root, optims);
             CSlice rooted_s = to_slice(rooted);
 
-            Max res = unwrap(to_number(rooted_s));
+            umax res = unwrap(to_number(rooted_s));
             return res;
         };
 
@@ -1939,36 +1917,70 @@ namespace test
         assert(root(1, 0) == 1);
         assert(root(29, 3) == 3);
         assert(root(34, 5) == 2);
-        assert(iroot_newton(15625, 3) == 25);
         assert(root(15625, 3) == 25);
         assert(root(15637, 3) == 25);
         assert(root(4096, 6) == 4);
-        u64 res = iroot_newton(18446744073709551614, 16);
-        //assert(root(18446744073709551614, 16) == 13);
 
-        if(sizeof(T) != 1)
+        if(sizeof(T) != 1) //17th root is bigger than half bits of u8!
+        {
+            assert(root(18446744073709551614, 16) == 15);
             assert(root(18446744073709551614, 17) == 13);
+        }
     }
 
     runtime_proc run_typed_tests(Memory_Resource* memory, Random_Generator* generator, size_t random_runs, size_t controlled_runs)
     {
+        std::cout << "TESTING UNTYPED "<< std::endl;
         test_misc(generator, random_runs);
+        std::cout << "=== OK ===\n" << std::endl;
     }
 
     template <typename T>
     runtime_proc run_untyped_tests(Memory_Resource* memory, Random_Generator* generator, size_t random_runs, size_t controlled_runs)
     {
-        test_root<T>(memory, generator, random_runs, controlled_runs);
+        std::cout << "TESTING: " << meta::type_name<T>() << std::endl;
+
+        std::cout << "add...        ";
         test_add_overflow<T>(memory, generator, random_runs);
+        std::cout << "ok" << std::endl;
+
+        std::cout << "sub...        ";
         test_sub_overflow<T>(memory, generator, random_runs);
+        std::cout << "ok" << std::endl;
+
+        std::cout << "complement... ";
         test_complement_overflow<T>(memory, generator, random_runs);
+        std::cout << "ok" << std::endl;
+
+        std::cout << "shift...      ";
         test_shift_overflow<T>(memory, generator, random_runs);
+        std::cout << "ok" << std::endl;
+
+        std::cout << "mul short...  ";
         test_mul_overflow<T>(memory, generator, random_runs, controlled_runs);
+        std::cout << "ok" << std::endl;
+
+        std::cout << "div short...  ";
         test_div_overflow_low<T>(memory, generator, random_runs, controlled_runs);
+        std::cout << "ok" << std::endl;
+
+        std::cout << "mul long...   ";
         test_mul_quadratic<T>(memory, generator, random_runs);
+        std::cout << "ok" << std::endl;
+
+        std::cout << "mul long...   ";
         test_div_bit_by_bit<T>(memory, generator, random_runs);
+        std::cout << "ok" << std::endl;
+
+        std::cout << "pow...        ";
         test_pow<T>(memory, generator, random_runs, controlled_runs);
-        
+        std::cout << "ok" << std::endl;
+
+        std::cout << "root...       ";
+        test_root<T>(memory, generator, random_runs, controlled_runs);
+        std::cout << "ok" << std::endl;
+
+        std::cout << "conversion... ";
         const size_t quarter_runs = random_runs / 4;
         if constexpr(sizeof(T) >= sizeof(u8))
             test_to_base<T, u8>(memory, generator, quarter_runs);
@@ -1981,6 +1993,8 @@ namespace test
 
         if constexpr(sizeof(T) >= sizeof(u64))
             test_to_base<T, u64>(memory, generator, quarter_runs);
+        std::cout << "ok" << std::endl;
+        std::cout << "=== OK ===\n" << std::endl;
     }
 
 
