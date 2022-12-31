@@ -67,34 +67,11 @@ namespace tiny_num
         size_t trivial_pow_below_power = TRIVIAL_POW_BELOW_POWER;
     };
 
-    
     #define let const auto
     #define mut auto
     #define proc constexpr auto
     #define func [[nodiscard]] constexpr auto
     #define cast(...) (__VA_ARGS__)
-
-    template <typename T>
-    struct Trivial_Maybe
-    {
-        bool has = false;
-        T value = T();
-
-        bool constexpr operator ==(Trivial_Maybe const&) const noexcept = default;
-    };
-
-    template <typename T>
-    func wrap(T const& value) -> Trivial_Maybe<T>
-    {
-        return Trivial_Maybe<T>{true, value};
-    }
-
-    template <typename T>
-    func unwrap(Trivial_Maybe<T> const& maybe) -> T
-    {
-        assert(maybe.has);
-        return maybe.value;
-    }
 
     template <typename T>
     struct Slice
@@ -479,7 +456,6 @@ namespace tiny_num
         }
     }
 
-
     template <typename T>
     struct Overflow
     {
@@ -551,6 +527,7 @@ namespace tiny_num
         return last(num) != 0;
     }
 
+    //@TODO: remove
     template <typename T>
     func is_striped_representation(Slice<T> num) -> bool
     {
@@ -567,14 +544,13 @@ namespace tiny_num
     }
 
     template <typename To = std::uint64_t, typename T = size_t>
-    func to_number(Slice<T> bignum) -> Trivial_Maybe<To>
+    func to_number(Slice<T> bignum) -> To
     {
         static_assert(is_allowed_digit<T>);
         let stripped = striped_trailing_zeros(bignum);
 
         const size_t total_size = stripped.size * sizeof(T);
-        if(total_size > sizeof(To))
-            return {};
+        assert(total_size <= sizeof(To));
 
         To out = 0;
         for(size_t i = 0; i < stripped.size; i++)
@@ -584,7 +560,7 @@ namespace tiny_num
             out |= cast(To) stripped[i] << shift_by;
         }
 
-        return wrap(out);
+        return out;
     }
 
     template <typename T, typename From = std::uint64_t>
@@ -1449,7 +1425,7 @@ namespace tiny_num
     }
 
     template <typename T, bool DO_QUOTIENT = true>
-    proc div_bit_by_bit(Slice<T>* quotient, Slice<T>* remainder, Slice<const T> num, Slice<const T> den, Optim_Info const& optims) -> Trivial_Maybe<Div_Res<T>>
+    proc div_bit_by_bit(Slice<T>* quotient, Slice<T>* remainder, Slice<const T> num, Slice<const T> den, Optim_Info const& optims) -> Div_Res<T>
     {
         static_assert(is_allowed_digit<T>);
         assert(is_striped_number(num));
@@ -1465,14 +1441,13 @@ namespace tiny_num
         if(DO_QUOTIENT)
             assert(check_are_aliasing<T>(*quotient, *remainder) == false);
 
-        if(den.size == 0)
-            return {};
+        assert(den.size > 0 && "cannot divide by zero!");
 
         if(num.size == 0)
         {
             let stripped_quotient = trim(*quotient, 0);
             let stripped_remainder = trim(*remainder, 0);
-            return wrap(Div_Res<T>{stripped_quotient, stripped_remainder});
+            return Div_Res<T>{stripped_quotient, stripped_remainder};
         }
 
         if(num.size < den.size)
@@ -1482,7 +1457,7 @@ namespace tiny_num
             mut stripped_quotient = trim(*quotient, 0);
 
             copy_slice<T>(&stripped_remainder, num, Iter_Direction::NO_ALIAS);
-            return wrap(Div_Res<T>{stripped_quotient, stripped_remainder});
+            return Div_Res<T>{stripped_quotient, stripped_remainder};
         }
 
         //@TODO: move up
@@ -1519,7 +1494,7 @@ namespace tiny_num
             }
 
             let stripped_remainder = trim(trimmed_remainder, remainder_size);
-            return wrap(Div_Res<T>{stripped_quotient, stripped_remainder});
+            return Div_Res<T>{stripped_quotient, stripped_remainder};
         }
 
         Slice<T> curr_remainder = trim(trimmed_remainder, 0);
@@ -1552,17 +1527,17 @@ namespace tiny_num
             ? striped_trailing_zeros<T>(trimmed_quotient)
             : trim(trimmed_quotient, 0);
 
-        return wrap(Div_Res<T>{stripped_quotient, curr_remainder});
+        return Div_Res<T>{stripped_quotient, curr_remainder};
     }
 
     template <typename T>
-    proc div(Slice<T>* quotient, Slice<T>* remainder, Slice<const T> num, Slice<const T> den, Optim_Info const& optims) -> Trivial_Maybe<Div_Res<T>>
+    proc div(Slice<T>* quotient, Slice<T>* remainder, Slice<const T> num, Slice<const T> den, Optim_Info const& optims) -> Div_Res<T>
     {
         return div_bit_by_bit(quotient, remainder, num, den, optims);
     }
 
     template <typename T>
-    proc rem_bit_by_bit(Slice<T>* remainder, Slice<const T> num, Slice<const T> den, Optim_Info const& optims) -> Trivial_Maybe<Slice<T>>
+    proc rem_bit_by_bit(Slice<T>* remainder, Slice<const T> num, Slice<const T> den, Optim_Info const& optims) -> Slice<T>
     {
         static_assert(is_allowed_digit<T>);
         Slice<T> quotient = {nullptr, 0};
@@ -1572,7 +1547,7 @@ namespace tiny_num
 
         assert(div_res.quotient.size == 0 && "in case of only remainder the quotient size should be 0");
         assert(div_res.quotient.data == nullptr && "and data nullptr as we set it");
-        return wrap(div_res.remainder);
+        return div_res.remainder;
     }
 
     template <typename T>
@@ -1686,8 +1661,6 @@ namespace tiny_num
         for(size_t i = 0; i < right.size; i++)
         {
             let mul_res = batch_mul_overflow<T>(&trimmed_temp, left, right[i], optims);
-
-            let temp_num = unwrap(to_number<u64>(mul_res.slice));
 
             //batch_mul_overflow is limited to left.size elems => in case of overflow
             // even if the overflow would fit into temp it is not added => we add it back
