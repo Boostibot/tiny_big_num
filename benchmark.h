@@ -1,531 +1,160 @@
 #pragma once
-#include <concepts>
 #include <cassert>
 #include <cstdint>
 #include <chrono>
 
-#define func constexpr auto [[nodiscard]]
+#define func auto [[nodiscard]]
 #define let const auto
 #define mut auto
-#define proc constexpr auto
+#define proc auto
 #define cast(...) (__VA_ARGS__)
 
-template <typename Fn, typename To = void>
-concept thunk = requires(Fn fn)
+namespace benchmark
 {
-    { fn() } -> std::convertible_to<To>;
-};
+    using i64 = std::int64_t;
 
-namespace detail
-{
-    using u64 = std::uint64_t;
-    using f64 = double;
-    using time_point = std::chrono::steady_clock::time_point;
-    using ms = std::chrono::milliseconds;
-    using ns = std::chrono::nanoseconds;
+    func min(i64 left, i64 right) -> i64 { return left < right ? left : right; }
+    func max(i64 left, i64 right) -> i64 { return left > right ? left : right; }
 
-    enum class Benchmark_Stage
-    {
-        Initial,
-        Blocked,
-    };
-
-    func min(u64 left, u64 right) -> u64 { return left < right ? left : right; }
-    func max(u64 left, u64 right) -> u64 { return left > right ? left : right; }
-
-    func min(f64 left, f64 right) -> f64 { return left < right ? left : right; }
-    func max(f64 left, f64 right) -> f64 { return left > right ? left : right; }
-
-    func clock() -> time_point
-    {
-        if(!std::is_constant_evaluated())
-            return std::chrono::high_resolution_clock::now();
-        else 
-            return time_point{};
+    //sorry c++ chrono but I really dont want to iteract with all those templates
+    func clock() noexcept -> i64 {
+        mut duration = std::chrono::high_resolution_clock::now().time_since_epoch();
+        return duration_cast<std::chrono::nanoseconds>(duration).count(); 
     }
 
-    func ns_diff(time_point from, time_point to) -> std::uint64_t
-    { 
-        return duration_cast<ns>(to - from).count(); 
-    };
+    template <typename Fn>
+    func ellapsed_time(Fn fn) noexcept -> i64
+    {
+        i64 from = clock();
+        fn();
+        return clock() - from;
+    }
+
+    struct Bench_Result
+    {
+        i64 iters = 0;
+        i64 time_ns = 0;
+    }
+
+    template <typename Fn>
+    func measure(i64 max_time_ms, Fn fn) noexcept -> Bench_Result
+    {
+        i64 max_time_ns = max_time_ms * 1'000'000;
+        return measure_ns(max_time_ns, max_time_ns / 10, fn);
+    }
+
+    template <typename Fn>
+    func measure_ns(i64 max_time_ns, i64 warm_up_ns, Fn fn, i64 base_block_size = 1, i64 num_checks = 5) noexcept -> Bench_Result
+    {
+        assert(num_checks > 0);
+        assert(base_block_size > 0);
+        assert(max_time_ns >= 0);
+        assert(warm_up_ns >= 0);
+
+        i64 to_time = warm_up_ns;
+
+        Bench_Result result;
+        i64 block_size = base_block_size;
+
+        i64 start = clock();
+
+        while(true)
+        {
+            i64 from = clock();
+            for(i64 i = 0; i < block_size; i++)
+                fn();
+
+            i64 now = clock();
+            i64 block_time = now - from;
+            i64 total_time = now - start;
+
+            result.time_ns += block_time;
+            result.iters += block_size;
+            if(total_time > to_time)
+            {
+                if(total_time > max_time_ns)
+                    break;
+
+                block_size = result.iters * max_time_ns / (total_time * num_checks);
+                block_size = max(block_size, 1);
+
+                result.iters = 0; //discard so far
+                result.time = 0;
+                to_time = max_time_ns;
+                stage = Benchmark_Stage::BLOCKED;
+            }
+        }
+
+        return result;
+    }
 
     proc use_pointer(char const volatile*) {}
-}
 
-template <thunk Fn>
-func ellapsed_time(Fn fn) -> detail::u64
-{
-    let from = detail::clock();
-    fn();
-    return (detail::clock() - from).count();
-}
+    //modified version of DoNotOptimize and ClobberMemmory from google test
+    #if defined(__GNUC__)
+        #define FORCE_INLINE __attribute__((always_inline))
+    #elif defined(_MSC_VER) && !defined(__clang__)
+        #define FORCE_INLINE __forceinline
+    #else
+        #define FORCE_INLINE
+    #endif
 
-struct Gather_Samples_Result
-{
-    std::uint64_t reported_time;
-    std::uint64_t total_time;
-    std::uint64_t reported_iters;
-    std::uint64_t total_iters;
+    #if (defined(__GNUC__) || defined(__clang__)) && !defined(__pnacl__) && !defined(EMSCRIPTN)
+        #define HAS_INLINE_ASSEMBLY
+    #endif
 
-    std::uint64_t block_size;
-    std::uint64_t sample_count;
-};
-
-//uses min_ms to determine iters per sample and then gathers samples until samples_size is filled or untill max_ms time passed
-// returns basic statistics including sample_count which contains the ammount of samples collected (<= samples_size)
-template <thunk Fn = void(*)()>
-func gather_samples(
-    detail::u64 optimal_ms, detail::u64 min_ms, detail::u64 max_ms, 
-    detail::u64 timing_samples[], detail::u64 samples_size, Fn fn) -> Gather_Samples_Result
-{
-    using namespace detail;
-
-    const ms optimal_time = optimal_ms;
-    const ms min_time = min_ms;
-    const ms max_time = max_ms;
-
-    const time_point start = detail::clock();
-    const time_point last = start;
-    const time_point after_min = start + min_time;
-
-    u64 orientation_iters = 0;
-
-    while(true)
-    {
-        fn();
-        orientation_iters ++;
-        if(detail::clock() > after_min)
-            break;
-    }
-
-    const ns orientation_time = start - detail::clock();
-    const u64 block_size = [&]{
-        u64 ret = 0;
-        if(optimal_time > orientation_time)
+    #ifdef HAS_INLINE_ASSEMBLY
+        template <typename T>
+        FORCE_INLINE proc do_no_optimize(T const& value)
         {
-            u64 den = max(orientation_time.count() * samples_size, 1);
-            ret = orientation_iters * (orientation_time - optimal_time).count() / den;
+            if(std::is_constant_evaluated())
+                return;
+            asm volatile("" : : "r,m"(value) : "memory");
         }
 
-        return max(ret, 1);
-    }();
-
-    u64 total_samples = 0;
-    const time_point after_max = start + max_time;
-    last = detail::clock();
-    while(true)
-    {
-        if(total_samples >= samples_size || last > after_max)
-            break;
-
-        for(u64 i = 0; i < block_size; i++)
-            fn();
-
-        const time_point now = detail::clock();
-        const u64 current_iter_time = ns_diff(last, now);
-        timing_samples[total_samples] = current_iter_time;
-
-        total_samples ++;
-        last = now;
-    }
-
-    const ns reported_time = after_max - detail::clock();
-    const ns total_time = orientation_time + reported_time;
-    const u64 reported_iters = total_samples * block_size;
-    const u64 total_iters = reported_iters + orientation_iters;
-
-    return Gather_Samples_Result{
-        .reported_time = reported_time.count(),
-        .total_time = total_time.count(),
-        .reported_iters = reported_iters,
-        .total_iters = total_iters,
-
-        .block_size = block_size,
-        .sample_count = total_samples,
-    };
-}
-
-//the most trivial version of benchmark without any sample discarting - only counts skipping warm_up_ms ms
-template <thunk Fn>
-func count_iters(detail::u64 time_ms, detail::u64 warm_up_ms, Fn fn, detail::u64 base_block_size = 1, detail::u64 num_checks = 5) -> detail::u64
-{
-    using namespace detail;
-
-    ms time = ms(time_ms);
-    ms warm_up = ms(warm_up_ms);
-
-    u64 iters = 0;
-    u64 block_size = base_block_size;
-    
-    Benchmark_Stage stage = Benchmark_Stage::Initial;
-    time_point start = detail::clock();
-    time_point to_time = time_point(warm_up);
-    if(warm_up == ms(0))
-    {
-        stage = Benchmark_Stage::Blocked;
-        to_time = time_point(time);
-    }
-
-    while(true)
-    {
-        for(u64 i = 0; i < block_size; i++)
-            fn();
-
-        let now = detail::clock();
-        iters += block_size;
-        if(now > to_time)
+        template <typename T>
+        FORCE_INLINE proc do_no_optimize(T& value)
         {
-            if(stage == Benchmark_Stage::Initial)
-            {
-                u64 den = max((now - start).count() * num_checks, 1);
-                block_size = max(iters * time.count() / den, 1);
-                iters = 0; //discard so far
-                to_time = now + time;
-                stage = Benchmark_Stage::Blocked;
-            }
-            else
-                break;
+            if(std::is_constant_evaluated())
+                return;
+            #if defined(__clang__)
+                asm volatile("" : "+r,m"(value) : : "memory");
+            #else
+                asm volatile("" : "+m,r"(value) : : "memory");
+            #endif
         }
-    }
 
-    return iters;
-}
+        FORCE_INLINE proc read_write_barrier(){
+            if(std::is_constant_evaluated())
+                return;
 
-struct Benchmark_Constants
-{
-    std::uint64_t optimal_samples = 100;
-    std::uint64_t base_block_size = 10;
-    double base_history = 0.9;
-    double base_delta = 0.01;
-    double history_softening_grow = 0.3;
-    double history_hardening_grow = 0.3;
-    double delta_softening_grow = 1.05;
-    double delta_hardening_grow = 0.90;
-    double history_min = 0.001;
-    double history_max = 0.999;
-    double delta_max = 0.15;
-};
-
-struct Benchmark_Stats
-{
-    double history_size;
-    double avg_history_size;
-    double max_history_size;
-    double min_history_size;
-
-    double delta;
-    double avg_delta;
-    double max_delta;
-    double min_delta;
-};
-
-struct Benchmark_Results
-{
-    std::uint64_t total_real_time;  
-    std::uint64_t total_time;  
-    std::uint64_t total_iters;  
-
-    std::uint64_t block_size;
-    std::uint64_t total_samples;
-    std::uint64_t accepted_samples;
-
-    std::uint64_t iters;
-    std::uint64_t time;
-
-    double iters_per_ms;
-    double ms_per_iter;
-
-    double iters_per_ns;
-    double ns_per_iter;
-};
-
-struct Benchmark_Combined_Results
-{
-    Benchmark_Results results;
-    Benchmark_Stats stats;
-};
-
-//uses min_ms to determine iters per sample and then collects samples until optimal_samples is filled or untill max_ms time passed
-// returns complex statistics
-template <bool DO_STATS = false, bool DO_HISTORY_CHANGE = true, bool DO_HISTORY_SIZE = true, thunk Fn = int(*)()>
-func benchmark(detail::u64 optimal_time_ms, detail::u64 min_time_ms, detail::u64 max_time_ms, detail::u64 optimal_samples, Fn fn, Benchmark_Constants constants) -> std::conditional_t<DO_STATS, Benchmark_Combined_Results, Benchmark_Results>
-{
-    using namespace detail;
-
-    let sum_geometrict_series = [](f64 damping){
-        return 1.0 / (1.0 - damping);
-    };
-
-    //constexpr bool DO_HISTORY_CHANGE = true;
-    constexpr bool DO_DELTA_CHANGE = true;
-
-    const ms optimal_time = ms(optimal_time_ms); 
-    const ms min_time = ms(min_time_ms); 
-    const ms max_time = ms(max_time_ms);
-
-    f64 required_delta = constants.base_delta;
-    f64 history_damping = constants.base_history;
-    f64 history_size = sum_geometrict_series(history_damping);
-
-    f64 history_size_highwater_mark = 0.0;
-    f64 history_size_lowwater_mark = 999999;
-    f64 history_size_running_sum = 0;
-    f64 delta_highwater_mark = 0.0;
-    f64 delta_lowwater_mark = 999999;
-    f64 delta_running_sum = 0;
-
-    u64 block_size = 1;
-    u64 total_iters = 0;
-    u64 total_time = 0;
-    u64 accepted_samples = 0;
-    u64 total_samples = 0;
-    u64 last_iters = 0;
-    Benchmark_Stage stage = Benchmark_Stage::Initial;
-
-    u64 reported_iters = 0;
-    u64 reported_time = 0;
-    f64 running_average_delta = 0;
-    f64 prev_time = 0.0;
-
-    time_point start = detail::clock();
-    time_point last = start;
-    time_point to_time = start + min_time;
-    time_point end_time = start + max_time;
-
-    //Algorhitm:
-    // (1) Run the given function untill min_time: This will lets us calculate block size 
-    //     (ammount of times to run the function in sequence counting as a single sample)
-    // 
-    // (2) Run block and check its runtime difference against previous run. 
-    //     If the difference is under some delta we add the sample and make the delta smaller
-    //     If the difference is over delta we ignore the sample and increase delta 
-    //     We also add the curren difference into the running_average_delta and damp it by history_damping
-    //       so that we have sample to check the next runs against.
-    //     We also vary ammount of damping of the running_average_delta (history) which lets us control how
-    //       far into the past we are considering results. This is important for functions with big variations in runtime.
-    //     
-    // (3) We report back the obtained data and statistics
-
-    while(true)
-    {
-        for(u64 i = 0; i < block_size; i++)
-            fn();
-
-        total_iters += block_size;
-
-        let now = detail::clock();
-        if(now > to_time)
-        {
-            if(now > end_time)
-                break;
-
-            if(stage == Benchmark_Stage::Initial)
-            {
-                const u64 ellapsed = ns_diff(start, now);
-                total_time += ellapsed;
-
-                if(cast(u64) optimal_time.count() > ellapsed)
-                {
-                    u64 den = max(ellapsed * optimal_samples, 1);
-                    block_size = max(total_iters * (optimal_time.count() - ellapsed) / den, 1);
-                }
-                else
-                    block_size = 1;
-
-                stage = Benchmark_Stage::Blocked;
-            }
-            else if(stage == Benchmark_Stage::Blocked)
-            {   
-                //calculate the current block stats
-                const u64 current_iter_time = ns_diff(last, now);
-                const u64 current_iter_count = total_iters - last_iters;
-
-                //calculate delta squared against the last block
-                const f64 curr_time = cast(f64) current_iter_time / current_iter_count;
-                const f64 delta = curr_time - prev_time;
-                const f64 delta2 = delta * delta;
-                const f64 curr_time2 = curr_time * curr_time;
-
-                running_average_delta *= history_damping;
-                running_average_delta += delta2;
-
-
-                //if delta is in required range the block is added else is ignored
-                f64 relative_average_delta;
-
-                if constexpr(DO_HISTORY_SIZE)
-                    relative_average_delta = running_average_delta / (curr_time2 * history_size);
-                else
-                    relative_average_delta = running_average_delta / curr_time2;
-
-                if(relative_average_delta < required_delta)
-                {
-                    reported_iters += current_iter_count;
-                    reported_time += current_iter_time;
-                    accepted_samples++;
-
-                    //harden requirements for delta and increase history size => less blocks will get accepted
-                    if constexpr (DO_DELTA_CHANGE)
-                        required_delta *= constants.delta_hardening_grow;;
-                    if constexpr (DO_HISTORY_CHANGE)
-                        history_damping += (constants.history_min - history_damping) * constants.history_hardening_grow;
-                }
-                else
-                {
-                    //soften requirements for delta and decrease history size => more blocks will get accepted
-                    if constexpr (DO_DELTA_CHANGE)
-                        required_delta *= constants.delta_softening_grow;;
-                    if constexpr (DO_HISTORY_CHANGE)
-                        history_damping += (constants.history_max - history_damping) * constants.history_softening_grow;
-                }
-
-                //update constants and track stats
-                if constexpr (DO_HISTORY_CHANGE)
-                    history_size = sum_geometrict_series(history_damping);
-
-                if constexpr (DO_HISTORY_CHANGE && DO_STATS)
-                {
-                    history_size_running_sum += history_size;
-                    history_size_highwater_mark = max(history_size_highwater_mark, history_size);
-                    history_size_lowwater_mark = min(history_size_lowwater_mark, history_size);
-                }
-
-                if constexpr (DO_DELTA_CHANGE && DO_STATS)
-                {
-                    delta_running_sum += required_delta;
-                    delta_highwater_mark = max(delta_highwater_mark, required_delta);
-                    delta_lowwater_mark = min(delta_lowwater_mark, required_delta);
-                }
-
-                prev_time = curr_time;
-                total_samples++;
-                total_time += current_iter_time;
-            }
-
-            last = detail::clock();
-            last_iters = total_iters;
+            asm volatile("" : : : "memory");
         }
-    }
+    #elif defined(_MSC_VER)
+        template <typename T>
+        FORCE_INLINE proc do_no_optimize(T const& value) {
+            if(std::is_constant_evaluated())
+                return;
 
-    if(reported_iters == 0)
-    {
-        reported_iters = total_iters;
-        reported_time = ns_diff(start, detail::clock());
-    }
+            use_pointer(cast(char const volatile*) cast(void*) &value);
+            _ReadWriteBarrier();
+        }
 
-    const f64 ns_per_iter = cast(f64) reported_iters / cast(f64) reported_time;
-    const f64 ms_per_iter = ns_per_iter / 1'000'000;
-    const u64 total_real_time = ns_diff(start, detail::clock());
+        FORCE_INLINE proc read_write_barrier() {
+            if(std::is_constant_evaluated())
+                return;
 
-    let reuslts = Benchmark_Results{
+            _ReadWriteBarrier();
+        }
+    #else
+        template <typename T>
+        FORCE_INLINE proc do_no_optimize(T const& value) {
+            use_pointer(cast(char const volatile*) cast(void*) &value);
+        }
 
-        .total_real_time = total_real_time,  
-        .total_time = total_time,  
-        .total_iters = total_iters,  
-
-        .block_size = block_size,
-        .total_samples = total_samples,
-        .accepted_samples = accepted_samples,
-
-        .iters = reported_iters,
-        .time = reported_time,
-
-        .iters_per_ms = 1 / ms_per_iter,
-        .ms_per_iter = ms_per_iter,
-
-        .iters_per_ns = 1 / ns_per_iter,
-        .ns_per_iter = ns_per_iter,
-    }; 
-
-    if constexpr (DO_STATS)
-    {
-        let stats = Benchmark_Stats{
-            .history_size = history_size,
-            .avg_history_size = history_size_running_sum / total_samples,
-            .max_history_size = history_size_highwater_mark,
-            .min_history_size = history_size_lowwater_mark,
-
-            .delta = required_delta,
-            .avg_delta = delta_running_sum / total_samples,
-            .max_delta = delta_highwater_mark,
-            .min_delta = delta_lowwater_mark,
-        };
-
-        return Benchmark_Combined_Results{
-            .results = reuslts,
-            .stats = stats,
-        };
-    }
-    else
-        return reuslts;
+        FORCE_INLINE proc read_write_barrier() {}
+    #endif
 }
-
-//modified version of DoNotOptimize and ClobberMemmory from google test
-#if defined(__GNUC__)
-    #define FORCE_INLINE __attribute__((always_inline))
-#elif defined(_MSC_VER) && !defined(__clang__)
-    #define FORCE_INLINE __forceinline
-#else
-    #define FORCE_INLINE
-#endif
-
-
-#if (defined(__GNUC__) || defined(__clang__)) && !defined(__pnacl__) && !defined(EMSCRIPTN)
-    #define HAS_INLINE_ASSEMBLY
-#endif
-
-#ifdef HAS_INLINE_ASSEMBLY
-    template <typename T>
-    FORCE_INLINE proc do_no_optimize(T const& value)
-    {
-        if(std::is_constant_evaluated())
-            return;
-        asm volatile("" : : "r,m"(value) : "memory");
-    }
-
-    template <typename T>
-    FORCE_INLINE proc do_no_optimize(T& value)
-    {
-        if(std::is_constant_evaluated())
-            return;
-        #if defined(__clang__)
-            asm volatile("" : "+r,m"(value) : : "memory");
-        #else
-            asm volatile("" : "+m,r"(value) : : "memory");
-        #endif
-    }
-
-    FORCE_INLINE proc read_write_barrier(){
-        if(std::is_constant_evaluated())
-            return;
-
-        asm volatile("" : : : "memory");
-    }
-#elif defined(_MSC_VER)
-    template <typename T>
-    FORCE_INLINE proc do_no_optimize(T const& value) {
-        if(std::is_constant_evaluated())
-            return;
-
-        detail::use_pointer(cast(char const volatile*) cast(void*) &value);
-        _ReadWriteBarrier();
-    }
-
-    FORCE_INLINE proc read_write_barrier() {
-        if(std::is_constant_evaluated())
-            return;
-
-        _ReadWriteBarrier();
-    }
-#else
-    template <typename T>
-    FORCE_INLINE proc do_no_optimize(T const& value) {
-        detail::use_pointer(cast(char const volatile*) cast(void*) &value);
-    }
-
-    FORCE_INLINE proc read_write_barrier() {}
-#endif
-
 
 #undef func 
 #undef let 

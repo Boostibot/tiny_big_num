@@ -19,4 +19,7 @@ x86\
 *.pdb
 *.idb
 .vs/arbitrary_precision/project-colors.json
-jot/
+
+xigoi_naf.h
+xigoi_optims.h
+xigoi.h

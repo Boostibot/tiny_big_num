@@ -1,8 +1,12 @@
 #pragma once
 
+#include <cstdint>
+#include <cstddef>
+#include <cassert>
+#include <cctype>
+#include <type_traits>
 
 #include <iostream>
-#include <cctype>
 #include <random>
 #include <limits>
 #include <initializer_list>
@@ -23,13 +27,47 @@
 #endif // USE_CUSTOM_LIB
 
 #include "benchmark.h"
-#include "big_int_ops.h"
+#include "tiny_big_num.h"
+
+#pragma once
 
 
-namespace test
+#define let const auto
+#define mut auto
+#define proc constexpr auto
+#define func [[nodiscard]] constexpr auto
+#define runtime_proc [[nodiscard]] auto
+#define runtime_func auto
+
+#define cast(...) (__VA_ARGS__)
+
+namespace tiny_num::test
 {
+    using u8 = std::uint8_t;
+    using u16 = std::uint16_t;
+    using u32 = std::uint32_t;
+    using u64 = std::uint64_t;
+
+    using i8 = std::int8_t;
+    using i16 = std::int16_t;
+    using i32 = std::int32_t;
+    using i64 = std::int64_t;
+
+    using b8 = bool;
+    using b16 = std::uint16_t;
+    using b32 = std::uint32_t;
+    using b64 = std::uint64_t;
+
+    using f32 = float;
+    using f64 = double;
+
+    using cstring = const char*;
+    using isize = i64;
+    using usize = size_t;
 
     using umax = u64;
+
+    using std::move;
     using std::size;
     using std::data;
 
@@ -251,7 +289,7 @@ namespace test
         return optims;
     }
 
-    u64 ipow_squares_native(u64 x, u64 n)
+    u64 single_pow_by_squaring_native(u64 x, u64 n)
     {
         if (x <= 1) 
             return x;
@@ -264,8 +302,7 @@ namespace test
         return y;
     }
 
-
-    u64 ipow_trivial(u64 x, u64 n)
+    u64 single_pow_trivial(u64 x, u64 n)
     {
         u64 res = 1;
         while(n > 0)
@@ -277,8 +314,7 @@ namespace test
         return res;
     }
 
-
-    u64 ilog_heyley(u64 of_value, u64 base)
+    u64 single_log_heyley(u64 of_value, u64 base)
     {
         const u64 x = of_value;
         const u64 b = base;
@@ -304,7 +340,7 @@ namespace test
 
         while(true)
         {
-            u64 value_from_curr_approximate = ipow_squares(b, y);
+            u64 value_from_curr_approximate = single_pow_by_squaring(b, y);
             u64 c_x = value_from_curr_approximate;
 
             prev_y = y;
@@ -324,7 +360,7 @@ namespace test
 
     }
 
-    u64 ilog_bsearch(u64 of_value, u64 base)
+    u64 single_log_bsearch(u64 of_value, u64 base)
     {
         const u64 x = of_value;
         const u64 b = base;
@@ -349,7 +385,7 @@ namespace test
         while(true)
         {
             u64 mid = (curr_lo + curr_hi) / 2;
-            u64 curr_approx = ipow_squares(b, mid);
+            u64 curr_approx = single_pow_by_squaring(b, mid);
 
             if(curr_approx > x)
                 curr_hi = mid;
@@ -435,62 +471,62 @@ namespace test
         assert(get_bit(0b0001001, 3) == 1);
 
 
-        assert(ipow_squares(3,3) == 27);
+        assert(single_pow_by_squaring(3,3) == 27);
 
-        assert(iroot_shifting(8, 3) == 2);
-        assert(iroot_shifting(9, 3) == 2);
-        assert(iroot_shifting(27, 3) == 3);
-        assert(iroot_shifting(28, 3) == 3);
-        assert(iroot_shifting(29, 3) == 3);
-        assert(iroot_shifting(34, 5) == 2);
-        assert(iroot_shifting(15625, 3) == 25);
-        assert(iroot_shifting(0, 0) == 1);
-        assert(iroot_shifting(1, 0) == 1);
-        assert(iroot_shifting(4096, 6) == 4);
-        assert(iroot_shifting(18446744073709551614, 17) == 13);
+        assert(single_root_shifting(8, 3) == 2);
+        assert(single_root_shifting(9, 3) == 2);
+        assert(single_root_shifting(27, 3) == 3);
+        assert(single_root_shifting(28, 3) == 3);
+        assert(single_root_shifting(29, 3) == 3);
+        assert(single_root_shifting(34, 5) == 2);
+        assert(single_root_shifting(15625, 3) == 25);
+        assert(single_root_shifting(0, 0) == 1);
+        assert(single_root_shifting(1, 0) == 1);
+        assert(single_root_shifting(4096, 6) == 4);
+        assert(single_root_shifting(18446744073709551614, 17) == 13);
 
-        assert(iroot_newton(8, 3) == 2);
-        assert(iroot_newton(9, 3) == 2);
-        assert(iroot_newton(27, 3) == 3);
-        assert(iroot_newton(28, 3) == 3);
-        assert(iroot_newton(29, 3) == 3);
-        assert(iroot_newton(34, 5) == 2);
-        assert(iroot_newton(15625, 3) == 25);
-        assert(iroot_newton(0, 0) == 1);
-        assert(iroot_newton(1, 0) == 1);
-        assert(iroot_newton(4096, 6) == 4);
-
-
-        assert(ilog_heyley(25, 2) == 4);
-        assert(ilog_heyley(255, 2) == 7);
-        assert(ilog_heyley(256, 2) == 8);
-        assert(ilog_heyley(4, 4) == 1);
-        assert(ilog_heyley(9, 3) == 2);
-        assert(ilog_heyley(26, 3) == 2);
-        assert(ilog_heyley(27, 3) == 3);
-        assert(ilog_heyley(64, 3) == 3);
-        assert(ilog_heyley(81, 3) == 4);
-        assert(ilog_heyley(16, 4) == 2);
-        assert(ilog_heyley(17, 4) == 2);
-        assert(ilog_heyley(27, 4) == 2);
-        assert(ilog_heyley(63, 4) == 2);
-        assert(ilog_heyley(64, 4) == 3);
+        assert(single_root_newton(8, 3) == 2);
+        assert(single_root_newton(9, 3) == 2);
+        assert(single_root_newton(27, 3) == 3);
+        assert(single_root_newton(28, 3) == 3);
+        assert(single_root_newton(29, 3) == 3);
+        assert(single_root_newton(34, 5) == 2);
+        assert(single_root_newton(15625, 3) == 25);
+        assert(single_root_newton(0, 0) == 1);
+        assert(single_root_newton(1, 0) == 1);
+        assert(single_root_newton(4096, 6) == 4);
 
 
-        assert(ilog_bsearch(25, 2) == 4);
-        assert(ilog_bsearch(255, 2) == 7);
-        assert(ilog_bsearch(256, 2) == 8);
-        assert(ilog_bsearch(4, 4) == 1);
-        assert(ilog_bsearch(9, 3) == 2);
-        assert(ilog_bsearch(26, 3) == 2);
-        assert(ilog_bsearch(27, 3) == 3);
-        assert(ilog_bsearch(64, 3) == 3);
-        assert(ilog_bsearch(81, 3) == 4);
-        assert(ilog_bsearch(16, 4) == 2);
-        assert(ilog_bsearch(17, 4) == 2);
-        assert(ilog_bsearch(27, 4) == 2);
-        assert(ilog_bsearch(63, 4) == 2);
-        assert(ilog_bsearch(64, 4) == 3);
+        assert(single_log_heyley(25, 2) == 4);
+        assert(single_log_heyley(255, 2) == 7);
+        assert(single_log_heyley(256, 2) == 8);
+        assert(single_log_heyley(4, 4) == 1);
+        assert(single_log_heyley(9, 3) == 2);
+        assert(single_log_heyley(26, 3) == 2);
+        assert(single_log_heyley(27, 3) == 3);
+        assert(single_log_heyley(64, 3) == 3);
+        assert(single_log_heyley(81, 3) == 4);
+        assert(single_log_heyley(16, 4) == 2);
+        assert(single_log_heyley(17, 4) == 2);
+        assert(single_log_heyley(27, 4) == 2);
+        assert(single_log_heyley(63, 4) == 2);
+        assert(single_log_heyley(64, 4) == 3);
+
+
+        assert(single_log_bsearch(25, 2) == 4);
+        assert(single_log_bsearch(255, 2) == 7);
+        assert(single_log_bsearch(256, 2) == 8);
+        assert(single_log_bsearch(4, 4) == 1);
+        assert(single_log_bsearch(9, 3) == 2);
+        assert(single_log_bsearch(26, 3) == 2);
+        assert(single_log_bsearch(27, 3) == 3);
+        assert(single_log_bsearch(64, 3) == 3);
+        assert(single_log_bsearch(81, 3) == 4);
+        assert(single_log_bsearch(16, 4) == 2);
+        assert(single_log_bsearch(17, 4) == 2);
+        assert(single_log_bsearch(27, 4) == 2);
+        assert(single_log_bsearch(63, 4) == 2);
+        assert(single_log_bsearch(64, 4) == 3);
 
         assert((highest_power_of_in_type(2, 2) == Power_And_Powed{1, 2}));
         assert((highest_power_of_in_type(1, 2) == Power_And_Powed{0, 1}));
@@ -513,7 +549,7 @@ namespace test
         let val_dist = make_exponential_distribution<u64>(min, max);
 
         assert(cast(u64) 1 << 42 == 4398046511104);
-        assert(ilog_heyley(4398046511104, 2) == 42);
+        assert(single_log_heyley(4398046511104, 2) == 42);
 
         for(size_t i = 0; i < random_runs; i++)
         {
@@ -521,20 +557,20 @@ namespace test
             let power_dist = make_exponential_distribution<u64>(min, val);
             u64 power = cast(u64) power_dist(*generator);
 
-            u64 rooted = iroot_shifting(val, power);
-            u64 powed_low = ipow_squares(rooted, power);
-            u64 back_down = iroot_shifting(powed_low, power);
+            u64 rooted = single_root_shifting(val, power);
+            u64 powed_low = single_pow_by_squaring(rooted, power);
+            u64 back_down = single_root_shifting(powed_low, power);
             if(rooted > 1 && powed_low < 43980465111) //so that no overflow
             {
-                u64 loged_heyley = ilog_heyley(powed_low, rooted);
-                u64 loged_bsearch = ilog_heyley(powed_low, rooted);
+                u64 loged_heyley = single_log_heyley(powed_low, rooted);
+                u64 loged_bsearch = single_log_heyley(powed_low, rooted);
                 assert(loged_heyley == power);
                 assert(loged_bsearch == power);
             }
 
             if(power < 100)
             {
-                u64 ref_powed_low = ipow_trivial(rooted, power);
+                u64 ref_powed_low = single_pow_trivial(rooted, power);
                 assert(ref_powed_low == powed_low);
             }
             else
@@ -555,8 +591,8 @@ namespace test
             assert(back_down == rooted);
 
 
-            u64 rooted_again = iroot_shifting(rooted, power);
-            u64 rooted_again_newton = iroot_newton(rooted, power);
+            u64 rooted_again = single_root_shifting(rooted, power);
+            u64 rooted_again_newton = single_root_newton(rooted, power);
 
             assert(rooted_again == rooted_again_newton);
         }
@@ -588,9 +624,9 @@ namespace test
 
             let loc = Op_Location::OUT_OF_PLACE;
 
-            let res1 = ::add_overflow_batch<T>(&out_s,  to_slice(left), to_slice(right), loc, cast(T) carry_in);
-            let res2 = ::add_overflow_batch<T>(&pad_left_s, content(pad_left), to_slice(right), loc, cast(T) carry_in); //test self assign
-            let res3 = ::add_overflow_batch<T>(&pad_right_s, to_slice(left), content(pad_right), loc, cast(T) carry_in); 
+            let res1 = ::batch_add_overflow_long<T>(&out_s,  to_slice(left), to_slice(right), loc, cast(T) carry_in);
+            let res2 = ::batch_add_overflow_long<T>(&pad_left_s, content(pad_left), to_slice(right), loc, cast(T) carry_in); //test self assign
+            let res3 = ::batch_add_overflow_long<T>(&pad_right_s, to_slice(left), content(pad_right), loc, cast(T) carry_in); 
 
             Slice res1_s = res1.slice;
             Slice res2_s = res2.slice;
@@ -637,7 +673,7 @@ namespace test
             umax adjusted_left = left & ~highest_one;
             umax adjusted_right = right & ~highest_one;
             umax adjusted_carry = cast(umax) low_bits(cast(T) carry_in);
-            umax expected = add_no_overflow(adjusted_left, adjusted_right, adjusted_carry);
+            umax expected = single_add_no_overflow(adjusted_left, adjusted_right, adjusted_carry);
 
             return test_add_overflow_batch(adjusted_left, adjusted_right, adjusted_carry, Res{expected, 0}, false);
         };
@@ -658,8 +694,8 @@ namespace test
             Slice left1_s = to_slice(&left1);
             Slice left2_s = to_slice(&left2);
 
-            let res2 = add_overflow_batch<T>(&left1_s, left1_s, adjusted_single, Op_Location::IN_PLACE);
-            let res1 = add_overflow_batch<T>(&left2_s, left2_s, Slice{&adjusted_single, 1}, Op_Location::IN_PLACE);
+            let res2 = batch_add_overflow_long<T>(&left1_s, left1_s, adjusted_single, Op_Location::IN_PLACE);
+            let res1 = batch_add_overflow_long<T>(&left2_s, left2_s, Slice{&adjusted_single, 1}, Op_Location::IN_PLACE);
 
             bool slices = is_equal<T>(res1.slice, res2.slice);
             bool overflows = res1.overflow == res2.overflow;
@@ -735,8 +771,8 @@ namespace test
 
             let loc = Op_Location::OUT_OF_PLACE;
 
-            let res1 = ::sub_overflow_batch<T>(&out_s,  to_slice(left), to_slice(right), loc, cast(T) carry_in);
-            let res2 = ::sub_overflow_batch<T>(&pad_left_s, content(pad_left), to_slice(right), loc, cast(T) carry_in); //test self assign
+            let res1 = ::batch_sub_overflow_long<T>(&out_s,  to_slice(left), to_slice(right), loc, cast(T) carry_in);
+            let res2 = ::batch_sub_overflow_long<T>(&pad_left_s, content(pad_left), to_slice(right), loc, cast(T) carry_in); //test self assign
 
             Slice res1_s = res1.slice;
             Slice res2_s = res2.slice;
@@ -767,7 +803,7 @@ namespace test
 
             umax adjusted_left = left;
             if(left < adjusted_carry + adjusted_right)
-                adjusted_left = add_no_overflow(left, adjusted_carry);
+                adjusted_left = single_add_no_overflow(left, adjusted_carry);
 
             umax expected = adjusted_left - adjusted_right - adjusted_carry;
             return test_sub_overflow_batch(adjusted_left, adjusted_right, adjusted_carry, Res{expected, 0});
@@ -827,7 +863,7 @@ namespace test
         Memory_Resource* resource = memory;
 
         //we dont test oveflow of this op 
-        runtime_proc complement_overflow_batch = [&](umax left_, umax carry_in = 1) -> umax{
+        runtime_proc batch_complement_overflow = [&](umax left_, umax carry_in = 1) -> umax{
             Padded pad_left = make_padded_vector_of_digits<T>(left_, resource, 1);
             Vector out = make_sized_vector<T>(MAX_TYPE_SIZE_FRACTION<T> + 1, resource);
 
@@ -837,8 +873,8 @@ namespace test
 
             let loc = Op_Location::OUT_OF_PLACE;
 
-            let res1 = ::complement_overflow_batch<T>(&out_s, left_s, cast(T) carry_in);
-            let res2 = ::complement_overflow_batch<T>(&pad_left_s, left_s, cast(T) carry_in); //test self assign
+            let res1 = ::batch_complement_overflow<T>(&out_s, left_s, cast(T) carry_in);
+            let res2 = ::batch_complement_overflow<T>(&pad_left_s, left_s, cast(T) carry_in); //test self assign
 
             let num1 = unwrap(to_number(res1.slice));
             let num2 = unwrap(to_number(res2.slice));
@@ -871,17 +907,17 @@ namespace test
             if(bits < BIT_SIZE<umax>)
                 cropped_complemented = low_bits(complemented, bits);
 
-            return complement_overflow_batch(left, carry_in) == cropped_complemented;
+            return batch_complement_overflow(left, carry_in) == cropped_complemented;
         };
     
         if constexpr(std::is_same_v<T, u8>)
         {
-            assert(complement_overflow_batch(0) == 0);
-            assert(complement_overflow_batch(1) == cast(u8)(-1));
-            assert(complement_overflow_batch(5) == cast(u8)(-5));
-            assert(complement_overflow_batch(0xFF) == cast(u8)(-0xFF));
-            assert(complement_overflow_batch(0xABCD) == cast(u16)(-0xABCD));
-            assert(complement_overflow_batch(0xFFFF0000) == cast(u32)(-cast(i64)0xFFFF0000));
+            assert(batch_complement_overflow(0) == 0);
+            assert(batch_complement_overflow(1) == cast(u8)(-1));
+            assert(batch_complement_overflow(5) == cast(u8)(-5));
+            assert(batch_complement_overflow(0xFF) == cast(u8)(-0xFF));
+            assert(batch_complement_overflow(0xABCD) == cast(u16)(-0xABCD));
+            assert(batch_complement_overflow(0xFFFF0000) == cast(u32)(-cast(i64)0xFFFF0000));
         }
 
         let exponential = make_exponential_distribution<T, umax>();
@@ -925,13 +961,13 @@ namespace test
 
             if(up_down)
             {
-                res1 = ::shift_up_overflow_batch<T>(&out_s, left_s, right, direction, cast(T) carry_in);
-                res2 = ::shift_up_overflow_batch<T>(&pad_left_s, left_s, right, direction, cast(T) carry_in);
+                res1 = ::batch_shift_up_overflow<T>(&out_s, left_s, right, direction, cast(T) carry_in);
+                res2 = ::batch_shift_up_overflow<T>(&pad_left_s, left_s, right, direction, cast(T) carry_in);
             }
             else
             {
-                res1 = ::shift_down_overflow_batch<T>(&out_s, left_s, right, direction, cast(T) carry_in);
-                res2 = ::shift_down_overflow_batch<T>(&pad_left_s, left_s, right, direction, cast(T) carry_in);
+                res1 = ::batch_shift_down_overflow<T>(&out_s, left_s, right, direction, cast(T) carry_in);
+                res2 = ::batch_shift_down_overflow<T>(&pad_left_s, left_s, right, direction, cast(T) carry_in);
             }
 
             let num1 = unwrap(to_number(res1.slice));
@@ -944,7 +980,7 @@ namespace test
             return Batch_Op_Result{num1, res1.overflow};
         };
 
-        runtime_proc shift_up_overflow_batch = [&](umax left, umax right, umax carry_in = 0) -> Batch_Op_Result{
+        runtime_proc batch_shift_up_overflow = [&](umax left, umax right, umax carry_in = 0) -> Batch_Op_Result{
             let forward = shift_both(left, right, carry_in, true, Iter_Direction::FORWARD);
             let backward = shift_both(left, right, carry_in, true, Iter_Direction::BACKWARD);
 
@@ -954,7 +990,7 @@ namespace test
             return forward;
         };
 
-        runtime_proc shift_down_overflow_batch = [&](umax left, umax right, umax carry_in = 0) -> Batch_Op_Result{
+        runtime_proc batch_shift_down_overflow = [&](umax left, umax right, umax carry_in = 0) -> Batch_Op_Result{
             let forward = shift_both(left, right, carry_in, false, Iter_Direction::FORWARD);
             let backward = shift_both(left, right, carry_in, false, Iter_Direction::BACKWARD);
 
@@ -967,37 +1003,37 @@ namespace test
 
         if constexpr(std::is_same_v<T, u8>)
         {
-            assert((shift_up_overflow_batch(0, 0, 0) == Res{0, 0}));
-            assert((shift_up_overflow_batch(0, 1, 0) == Res{0, 0}));
-            assert((shift_up_overflow_batch(0, 1, 0xFF) == Res{0, 0xFF})); //should be consistent with multiply
+            assert((batch_shift_up_overflow(0, 0, 0) == Res{0, 0}));
+            assert((batch_shift_up_overflow(0, 1, 0) == Res{0, 0}));
+            assert((batch_shift_up_overflow(0, 1, 0xFF) == Res{0, 0xFF})); //should be consistent with multiply
 
-            assert((shift_up_overflow_batch(1, 1) == Res{2, 0}));
-            assert((shift_up_overflow_batch(1, 4) == Res{16, 0}));
-            assert((shift_up_overflow_batch(1, 4, 0b1010'0000) == Res{0b11010, 0}));
-            assert((shift_up_overflow_batch(11, 4) == Res{176, 0}));
-            assert((shift_up_overflow_batch(0xAB, 0x4) == Res{0xB0, 0xA}));
-            assert((shift_up_overflow_batch(0xAB, 0x4, 0xD0) == Res{0xBD, 0xA}));
-            assert((shift_up_overflow_batch(0xAB, 0x4, 0x0D) == Res{0xB0, 0xA}));
-            assert((shift_up_overflow_batch(0b0101'0101'0111'0001, 7) == Res{0b1011'1000'1000'0000, 0b010'1010}));
-            assert((shift_up_overflow_batch(0b0101'0101'0111'0001, 0) == Res{0b0101'0101'0111'0001, 0}));
-            assert((shift_up_overflow_batch(0b0101'0101'0111'0001, 7, 0b11001100) == Res{0b1011'1000'1110'0110, 0b010'1010}));
+            assert((batch_shift_up_overflow(1, 1) == Res{2, 0}));
+            assert((batch_shift_up_overflow(1, 4) == Res{16, 0}));
+            assert((batch_shift_up_overflow(1, 4, 0b1010'0000) == Res{0b11010, 0}));
+            assert((batch_shift_up_overflow(11, 4) == Res{176, 0}));
+            assert((batch_shift_up_overflow(0xAB, 0x4) == Res{0xB0, 0xA}));
+            assert((batch_shift_up_overflow(0xAB, 0x4, 0xD0) == Res{0xBD, 0xA}));
+            assert((batch_shift_up_overflow(0xAB, 0x4, 0x0D) == Res{0xB0, 0xA}));
+            assert((batch_shift_up_overflow(0b0101'0101'0111'0001, 7) == Res{0b1011'1000'1000'0000, 0b010'1010}));
+            assert((batch_shift_up_overflow(0b0101'0101'0111'0001, 0) == Res{0b0101'0101'0111'0001, 0}));
+            assert((batch_shift_up_overflow(0b0101'0101'0111'0001, 7, 0b11001100) == Res{0b1011'1000'1110'0110, 0b010'1010}));
 
-            assert((shift_down_overflow_batch(0, 0, 0) == Res{0, 0}));
-            assert((shift_down_overflow_batch(0, 1, 0) == Res{0, 0}));
-            assert((shift_down_overflow_batch(0, 1, 0xFF) == Res{0, 0xFF}));
-            assert((shift_down_overflow_batch(1, 1) == Res{0, 0x80}));
-            assert((shift_down_overflow_batch(0b10, 1) == Res{0b1, 0}));
-            assert((shift_down_overflow_batch(0b110000, 3) == Res{0b110, 0}));
-            assert((shift_down_overflow_batch(0b0101'0011, 1) == Res{0b101001, 0x80}));
-            assert((shift_down_overflow_batch(0b0101'0011, 4) == Res{0b101, 0b0011'0000}));
-            assert((shift_down_overflow_batch(0b0101'0011, 4, 0b0000'1111) == Res{0b1111'0101, 0b0011'0000}));
-            assert((shift_down_overflow_batch(0b0101'0011, 0) == Res{0b0101'0011, 0}));
-            assert((shift_down_overflow_batch(0b0101'0011, 7) == Res{0b0, 0b10100110}));
-            assert((shift_down_overflow_batch(0b0101'0011, 7, 0b1100'0111) == Res{0b1000'1110, 0b10100110}));
-            assert((shift_down_overflow_batch(0xFFEEDD, 4) == Res{0x0FFEED, 0xD0}));
-            assert((shift_down_overflow_batch(0xFFEEDD, 4, 0x0A) == Res{0xAFFEED, 0xD0}));
-            assert((shift_down_overflow_batch(0b0101010101110001, 5) == Res{0b0000001010101011, 0b10001000}));
-            assert((shift_down_overflow_batch(0b0101010101110001, 5, 0b1010'1111) == Res{0b0111101010101011, 0b10001000}));
+            assert((batch_shift_down_overflow(0, 0, 0) == Res{0, 0}));
+            assert((batch_shift_down_overflow(0, 1, 0) == Res{0, 0}));
+            assert((batch_shift_down_overflow(0, 1, 0xFF) == Res{0, 0xFF}));
+            assert((batch_shift_down_overflow(1, 1) == Res{0, 0x80}));
+            assert((batch_shift_down_overflow(0b10, 1) == Res{0b1, 0}));
+            assert((batch_shift_down_overflow(0b110000, 3) == Res{0b110, 0}));
+            assert((batch_shift_down_overflow(0b0101'0011, 1) == Res{0b101001, 0x80}));
+            assert((batch_shift_down_overflow(0b0101'0011, 4) == Res{0b101, 0b0011'0000}));
+            assert((batch_shift_down_overflow(0b0101'0011, 4, 0b0000'1111) == Res{0b1111'0101, 0b0011'0000}));
+            assert((batch_shift_down_overflow(0b0101'0011, 0) == Res{0b0101'0011, 0}));
+            assert((batch_shift_down_overflow(0b0101'0011, 7) == Res{0b0, 0b10100110}));
+            assert((batch_shift_down_overflow(0b0101'0011, 7, 0b1100'0111) == Res{0b1000'1110, 0b10100110}));
+            assert((batch_shift_down_overflow(0xFFEEDD, 4) == Res{0x0FFEED, 0xD0}));
+            assert((batch_shift_down_overflow(0xFFEEDD, 4, 0x0A) == Res{0xAFFEED, 0xD0}));
+            assert((batch_shift_down_overflow(0b0101010101110001, 5) == Res{0b0000001010101011, 0b10001000}));
+            assert((batch_shift_down_overflow(0b0101010101110001, 5, 0b1010'1111) == Res{0b0111101010101011, 0b10001000}));
         }
     }
 
@@ -1056,8 +1092,8 @@ namespace test
             Slice out_s = to_slice<T>(&out);
             Slice pad_left_s = to_slice<T>(&pad_left.vector);
 
-            let res1 = ::mul_overflow_batch<T>(&out_s, left_s, cast(T) right, optims, cast(T) carry_in);
-            let res2 = ::mul_overflow_batch<T>(&pad_left_s, left_s, cast(T) right, optims, cast(T) carry_in);
+            let res1 = ::batch_mul_overflow<T>(&out_s, left_s, cast(T) right, optims, cast(T) carry_in);
+            let res2 = ::batch_mul_overflow<T>(&pad_left_s, left_s, cast(T) right, optims, cast(T) carry_in);
 
             Slice res1_s = res1.slice;
             Slice res2_s = res2.slice;
@@ -1108,7 +1144,7 @@ namespace test
                 assert(test_mul_overflow_batch(25, 5, 0, Res{125, 0}, optims));
                 assert(test_mul_overflow_batch(0xFF, 0x10, 0, Res{0xF0, 0xF}, optims));
 
-                assert((mul_overflow<T>(0xFF, 0x10, 0xC) == Overflow<T>{0xFC, 0xF}));
+                assert((single_mul_overflow<T>(0xFF, 0x10, 0xC) == Overflow<T>{0xFC, 0xF}));
                 assert(test_mul_overflow_batch(0xFFEE, 0x80, 0, Res{0xF700, 0x7F}, optims));
                 assert(test_mul_overflow_batch(0xFFEE, 0x80, 0, Res{0xF700, 0x7F}, optims));
                 assert(test_mul_overflow_batch(0xA1, 0x11, 0, Res{0xB1, 0xA}, optims));
@@ -1142,7 +1178,7 @@ namespace test
         using CSlice = Slice<const T>;
         using Slice = Slice<T>;
 
-        assert((div_overflow_low<T>(0x12, 0x0A, 0) == Overflow<T>{1, 0x08}));
+        assert((single_div_overflow<T>(0x12, 0x0A, 0) == Overflow<T>{1, 0x08}));
 
         Memory_Resource* resource = memory;
 
@@ -1156,8 +1192,8 @@ namespace test
             Slice out_s = to_slice<T>(&out);
             Slice pad_left_s = slice(to_slice<T>(&pad_left.vector), 1);
 
-            let res1 = ::div_overflow_low_batch<T>(&out_s, left_s, cast(T) right, optims, cast(T) carry_in);
-            let res2 = ::div_overflow_low_batch<T>(&pad_left_s, left_s, cast(T) right, optims, cast(T) carry_in);
+            let res1 = ::batch_div_overflow<T>(&out_s, left_s, cast(T) right, optims, cast(T) carry_in);
+            let res2 = ::batch_div_overflow<T>(&pad_left_s, left_s, cast(T) right, optims, cast(T) carry_in);
 
             let num1 = unwrap(to_number(res1.slice));
             let num2 = unwrap(to_number(res2.slice));
@@ -1250,8 +1286,8 @@ namespace test
             Slice right_s = to_slice(&right);
             Slice output_s = to_slice(&output);
 
-            let res_out = ::fused_mul_add_overflow_batch<T>(&output_s, left_s, right_s, cast(T) coef, optims, Op_Location::OUT_OF_PLACE);
-            let res_in = ::fused_mul_add_overflow_batch<T>(&left_s, left_s, right_s, cast(T) coef, optims, Op_Location::IN_PLACE);
+            let res_out = ::batch_fused_mul_add_overflow<T>(&output_s, left_s, right_s, cast(T) coef, optims, Op_Location::OUT_OF_PLACE);
+            let res_in = ::batch_fused_mul_add_overflow<T>(&left_s, left_s, right_s, cast(T) coef, optims, Op_Location::IN_PLACE);
         
             push_back(&output, res_out.overflow);
             push_back(&left, res_in.overflow);
@@ -1273,9 +1309,9 @@ namespace test
             Vector left = make_vector_of_digits<T>(left_, resource);
             Vector right = make_vector_of_digits<T>(right_, resource);
 
-            size_t to_size = required_mul_to_size(size(left), size(right));
-            size_t aux_size1 = required_mul_quadratic_auxiliary_size(size(left), size(right));
-            size_t aux_size2 = required_mul_karatsuba_auxiliary_size(size(left), size(right));
+            size_t to_size = required_mul_out_size(size(left), size(right));
+            size_t aux_size1 = required_mul_quadratic_aux_size(size(left), size(right));
+            size_t aux_size2 = required_mul_karatsuba_aux_size(size(left), size(right));
 
             size_t aux_size = max(aux_size1, aux_size2)*10; //to allow all karatsuba recursions
 
@@ -1461,7 +1497,7 @@ namespace test
     template <typename Num, typename Rep, typename Conv_Fn>
     func to_base(Slice<const Num> num, Num base, Conv_Fn conv, Optim_Info optims, Memory_Resource* resource) -> Vector<Rep> {
         Vector<Num> temp = make_vector_of_slice<Num>(num, resource);
-        Vector<Rep> out = make_sized_vector<Rep>(required_size_to_base<Num>(num.size, base), resource);
+        Vector<Rep> out = make_sized_vector<Rep>(required_to_base_out_size<Num>(num.size, base), resource);
 
         Slice<Num> temp_s = to_slice(&temp);
         Slice<Rep> out_s = to_slice(&out);
@@ -1475,7 +1511,7 @@ namespace test
 
     template <typename Num, typename Rep, typename Conv_Fn>
     func from_base(Slice<const Rep> rep, Num base, Conv_Fn conv, Optim_Info optims, Memory_Resource* resource) -> Vector<Num> {
-        size_t required_size = required_size_from_base<Num>(rep.size, base);
+        size_t required_size = required_from_base_out_size<Num>(rep.size, base);
         Vector<Num> out = make_sized_vector<Num>(required_size + 1, resource); //@TODO: why is there the +1
 
         Slice<Num> out_s = to_slice(&out);
@@ -1502,15 +1538,15 @@ namespace test
     func to_base(Slice<const Num> num, Num base, Memory_Resource* resource) -> Vector<char> {
         assert(base > 2);
         assert(base <= 36);
-
-        constexpr char val_to_char_table[36] = {
-            '0', '1', '2', '3', '4', '5', '6', '7', '8', '9',
-            'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J',
-            'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T',
-            'U', 'V', 'W', 'X', 'Y', 'Z'
-        };
-    
         let conversion = [&](Num value) -> char {
+
+            constexpr char val_to_char_table[36] = {
+                '0', '1', '2', '3', '4', '5', '6', '7', '8', '9',
+                'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J',
+                'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T',
+                'U', 'V', 'W', 'X', 'Y', 'Z'
+            };
+
             assert(value < 36);
             return val_to_char_table[value];
         };
@@ -1623,7 +1659,7 @@ namespace test
     {
         using umax = umax;
         constexpr size_t num_digits = digits_to_represent<Num, umax>();
-        const size_t max_size = required_size_to_base<Num>(num_digits, base);
+        const size_t max_size = required_to_base_out_size<Num>(num_digits, base);
 
         Vector<Rep> converted = make_sized_vector<Rep>(max_size, resource);
         size_t size = 0;
@@ -1796,8 +1832,8 @@ namespace test
         };
 
         runtime_proc pow_ = [&](CSlice num, size_t pow, Optim_Info optims, Pow_Algorhitm algorhitm) -> Vector {
-            size_t required_size = required_pow_to_size(num, pow);
-            size_t aux_size = required_pow_by_squaring_auxiliary_size(num, pow)*100 + 100;
+            size_t required_size = required_pow_out_size(num, pow);
+            size_t aux_size = required_pow_by_squaring_aux_size(num, pow)*100 + 100;
             Vector out = make_sized_vector<T>(required_size, resource);
             Vector aux = make_sized_vector<T>(aux_size, resource);
 
@@ -1904,7 +1940,7 @@ namespace test
         Memory_Resource* resource = memory;
 
         runtime_proc root_ = [&](CSlice num, size_t root, Optim_Info optims) -> Vector {
-            size_t required_size = root_required_to_size(log2(num), root, BIT_SIZE<T>);
+            size_t required_size = root_required_out_size(log2(num), root, BIT_SIZE<T>);
             size_t aux_size = root_required_aux_size(log2(num), root, BIT_SIZE<T>);
             Vector out = make_sized_vector<T>(required_size, resource);
             Vector aux = make_sized_vector<T>(aux_size, resource);
@@ -2009,25 +2045,6 @@ namespace test
         if constexpr(sizeof(T) >= sizeof(u64))
             test_to_base<T, u64>(memory, generator, quarter_runs);
 
-        if constexpr(sizeof(T) >= sizeof(u64))
-        {
-            size_t fact_of = 1000;
-            Vector<T> digits = make_sized_vector<T>(fact_of, memory);
-            Vector<T> digits = make_sized_vector<T>(fact_of, memory);
-            Slice<T> digits_s = to_slice(&digits);
-
-
-            auto time = ellapsed_time([&]{
-                Slice<T> output = factorial<T>(&digits_s, fact_of, Optim_Info{});
-                size_t size = required_size_to_base<T>(output.size, 10);
-                Vector<T> converted = make_sized_vector<T>(fact_of, memory);
-
-            });
-
-            std::cout << "FACTORIAL 1000: " << time << std::endl; //173000
-        }
-
-
         std::cout << "ok" << std::endl;
         std::cout << "=== OK ===\n" << std::endl;
     }
@@ -2072,3 +2089,14 @@ namespace test
         
     }
 }
+
+
+
+
+#undef let 
+#undef mut 
+#undef proc 
+#undef func 
+#undef runtime_proc 
+#undef runtime_func 
+#undef cast

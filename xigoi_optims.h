@@ -7,7 +7,7 @@
 #include <iostream>
 #include <ranges>
 #include <vector>
-#include "naf.h"
+#include "xigoi_naf.h"
 
 namespace xigoi_optims
 {

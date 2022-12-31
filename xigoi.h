@@ -7,7 +7,6 @@
 #include <iostream>
 #include <ranges>
 #include <vector>
-#include "naf.h"
 
 namespace xigoi
 {
