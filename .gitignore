@@ -23,3 +23,8 @@ x86\
 xigoi_naf.h
 xigoi_optims.h
 xigoi.h
+
+arbitrary_precision.sln
+arbitrary_precision.vcxproj
+arbitrary_precision.vcxproj.filters
+arbitrary_precision.vcxproj.user
