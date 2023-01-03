@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <cassert>
 #include <cctype>
+#include <cmath>
 #include <type_traits>
 
 #include <iostream>
@@ -11,26 +12,12 @@
 #include <limits>
 #include <initializer_list>
 #include <memory_resource>
-#include <vector>
 #include <array>
 #include <algorithm>
 
-#define USE_CUSTOM_LIB
-
-#include "jot/meta.h"
-
-#ifdef USE_CUSTOM_LIB
-#include "jot/stack.h"
-#include "jot/allocator_stack.h"
-#include "jot/allocator_ring.h"
-#include "jot/defer.h"
-#endif // USE_CUSTOM_LIB
-
+#include "pod_vector.h"
 #include "benchmark.h"
 #include "tiny_big_num.h"
-
-#pragma once
-
 
 #define let const auto
 #define mut auto
@@ -71,114 +58,78 @@ namespace tiny_num::test
     using std::size;
     using std::data;
 
-    #ifdef USE_CUSTOM_LIB
-        template <typename T>
-        using Vector = jot::Stack<T>;
-
-        using Memory_Resource = jot::Allocator;
-
-        template<typename T>
-        func make_sized_vector(size_t size, Memory_Resource* resource) -> Vector<T>
-        {
-            using namespace jot;
-            Vector<T> vec = {resource};
-            if(size != 0)
-                force(resize(&vec, cast(isize) size));
-            return vec;
-        }
-
-        template<typename T>
-        func push_back(Vector<T>* vec, T pushed)
-        {
-            jot::force(jot::push(vec, move(pushed)));
-        }
-
-        template<typename T>
-        func resize(Vector<T>* vec, size_t size) -> void
-        {
-            jot::force(jot::resize(vec, size));
-        }
-
-    #else
-        template <typename T>
-        using Vector = std::pmr::vector<T>;
-
-        using Memory_Resource = std::pmr::memory_resource;
-
-        template<typename T>
-        func make_sized_vector(size_t size, Memory_Resource* resource) -> Vector<T>
-        {
-            Vector<T> vec(std::move(resource));
-            if(size != 0)
-                vec.resize(size);
-            return vec;
-        }
-
-        template<typename T>
-        func push_back(Vector<T>* vec, T pushed)
-        {
-            vec->push_back(move(pushed));
-        }
-
-        template<typename T>
-        func resize(Vector<T>* vec, size_t size)
-        {
-            vec->resize(size);
-        }
-    #endif
+    template<typename T>
+    func make_sized_vector(size_t size) -> POD_Vector<T>
+    {
+        POD_Vector<T> vec;
+        vec.resize(size);
+        return vec;
+    }
 
     template<typename T>
-    func to_slice(Vector<T> const& vec) -> Slice<const T>
+    func push_back(POD_Vector<T>* vec, T pushed)
+    {
+        vec->push_back(move(pushed));
+    }
+
+    template<typename T>
+    func resize(POD_Vector<T>* vec, size_t size)
+    {
+        vec->resize(size);
+    }
+
+    template<typename T>
+    func slice(POD_Vector<T> const& vec) -> Slice<const T>
     {
         return Slice<const T>{data(vec), cast(usize) size(vec)};
     }
 
     template<typename T>
-    func to_slice(Vector<T>* vec) -> Slice<T>
+    func slice(POD_Vector<T>* vec) -> Slice<T>
     {
         return Slice<T>{std::data(*vec), cast(usize) size(*vec)};
     }
 
     template<typename T>
-    func make_vector_of_slice(Slice<const T> const& slice, Memory_Resource* resource) -> Vector<T>
+    func make_vector_of_slice(Slice<const T> const& items) -> POD_Vector<T>
     {
-        mut vec = make_sized_vector<T>(slice.size, resource);
-        mut vec_slice = to_slice(&vec);
-        copy_slice<T>(&vec_slice, slice, Iter_Direction::NO_ALIAS);
+        mut vec = make_sized_vector<T>(items.size);
+        mut vec_slice = slice(&vec);
+        copy_slice<T>(&vec_slice, items, Iter_Direction::NO_ALIAS);
 
         return vec;
     }
 
     template<typename T>
-    func make_vector_of_digits(umax val, Memory_Resource* resource) -> Vector<T>
+    func make_vector_of_digits(umax val) -> POD_Vector<T>
     {
         constexpr size_t count = digits_to_represent<T, umax>();
-        Vector<T> vec = make_sized_vector<T>(count, resource);
-        Slice<T> slice = to_slice(&vec);
-        Slice<T> converted_slice = from_number<T>(&slice, val);
+        POD_Vector<T> vec = make_sized_vector<T>(count);
+        Slice<T> digits = slice(&vec);
+        Slice<T> converted_slice = from_number<T>(&digits, val);
         resize(&vec, converted_slice.size);
         return vec;
     }
 
     template <typename T>
-    struct Padded_Vector
+    struct Padded_POD_Vector
     {
-        Vector<T> vector;
+        POD_Vector<T> vector;
         size_t prefix_size = 0;
         size_t content_size = 0;
         size_t postfix_size = 0;
     };
 
     template <typename T>
-    func make_padded_vector_of_digits(umax val, Memory_Resource* resource, size_t pref_size = 1, size_t post_size = 1) -> Padded_Vector<T>
+    func make_padded_vector_of_digits(umax val, size_t pref_size = 1, size_t post_size = 1) -> Padded_POD_Vector<T>
     {
         constexpr size_t count = digits_to_represent<T, umax>();
         size_t total_size = pref_size + count + post_size;
 
-        Padded_Vector<T> padded;
+        Padded_POD_Vector<T> padded;
 
-        padded.vector = make_sized_vector<T>(total_size, resource);
-        Slice<T> whole = to_slice(&padded.vector);
+        padded.vector = make_sized_vector<T>(total_size);
+        Slice<T> whole = slice(&padded.vector);
         Slice<T> digits = slice_size(whole, pref_size, count);
         Slice<T> content = from_number<T>(&digits, val);
 
@@ -190,16 +141,16 @@ namespace tiny_num::test
     }
 
     template <typename T>
-    func content(Padded_Vector<T>* padded) -> Slice<T>
+    func content(Padded_POD_Vector<T>* padded) -> Slice<T>
     {
-        Slice<T> whole = to_slice(&padded->vector);
+        Slice<T> whole = slice(&padded->vector);
         return slice_size(whole, padded->prefix_size, padded->content_size);
     }
 
     template <typename T>
-    func content(Padded_Vector<T> const& padded) -> Slice<const T>
+    func content(Padded_POD_Vector<T> const& padded) -> Slice<const T>
     {
-        Slice<const T> whole = to_slice(padded.vector);
+        Slice<const T> whole = slice(padded.vector);
         return slice_size(whole, padded.prefix_size, padded.content_size);
     }
 
@@ -248,7 +199,7 @@ namespace tiny_num::test
         template<class Generator>
         T operator()(Generator& gen) const 
         {
-            double val = pow(this->quotient, this->uniform_distribution(gen)) - this->shift;
+            double val = std::pow(this->quotient, this->uniform_distribution(gen)) - this->shift;
             if constexpr (std::is_floating_point_v<T>)
                 return cast(T) val;
             else
@@ -260,11 +211,11 @@ namespace tiny_num::test
     template <typename T, typename ReturnT = umax>
     runtime_func make_exponential_distribution(ReturnT min = 0, ReturnT max = std::numeric_limits<ReturnT>::max()) -> Uniform_Exponential_Distribution<ReturnT>
     {
-        double quot = pow(2, BIT_SIZE<T>);
+        double quot = std::pow(2, BIT_SIZE<T>);
         return {cast(double) min, cast(double) max, quot};
     }
 
-    runtime_func generate_random_optims(Random_Generator* gen) -> Optim_Info
+    runtime_func generate_random_optims(Random_Generator* gen) -> Optims
     {
         let exp_dist = make_exponential_distribution<u8, size_t>(0, 100);
         //std::uniform_int_distribution<> dist{0, 100};
@@ -272,7 +223,7 @@ namespace tiny_num::test
         let random_bool = [&]() -> bool { return cast(bool) uniform_bool(*gen); };
         let random_num = [&]() -> size_t { return cast(size_t) exp_dist(*gen); };
 
-        Optim_Info optims;
+        Optims optims;
         optims.mul_shift = random_bool();
         optims.mul_consts = random_bool();
         optims.mul_half_bits = random_bool();
@@ -281,125 +232,17 @@ namespace tiny_num::test
         optims.div_consts = random_bool();
         optims.rem_optims = random_bool();
 
-        optims.max_reusion_depth = random_num();
+        optims.max_recursion_depth = random_num();
         optims.mul_quadratic_both_below_size = random_num();
         optims.mul_quadratic_single_below_size = random_num();
-        optims.trivial_pow_below_power = random_num();
+        optims.pow_trivial_below_power = random_num();
 
         return optims;
     }
 
-    u64 single_pow_by_squaring_native(u64 x, u64 n)
-    {
-        if (x <= 1) 
-            return x;
 
-        u64 y = 1;
-        for (; n != 0; n >>= 1, x *= x)
-            if (n & 1)
-                y *= x;
 
-        return y;
-    }
-
-    u64 single_pow_trivial(u64 x, u64 n)
-    {
-        u64 res = 1;
-        while(n > 0)
-        {
-            res *= x;
-            n--;
-        }
-
-        return res;
-    }
-
-    u64 single_log_heyley(u64 of_value, u64 base)
-    {
-        const u64 x = of_value;
-        const u64 b = base;
-
-        //b^y = x
-        //y = log_b(x)
-
-        if(x <= 1)
-            return 0;
-        if(base <= 1)
-            return 0;
-
-        const u64 log2x = find_last_set_bit(x);
-        const u64 log2b = find_last_set_bit(b);
-
-        assert(log2x != 0);
-        assert(log2b != 0);
-
-        const u64 lower_initial_estimate = log2x / (log2b + 1);
-        const u64 higher_initial_estimate = (log2x + log2b) / (log2b);
-        u64 y = higher_initial_estimate;
-        u64 prev_y = y;
-
-        while(true)
-        {
-            u64 value_from_curr_approximate = single_pow_by_squaring(b, y);
-            u64 c_x = value_from_curr_approximate;
-
-            prev_y = y;
-            if(c_x <= x)
-                break;
-
-            u64 new_y = y - 2*(c_x - x) / (x + c_x);
-
-            //if we didnt move at all we are one above the answer
-            if(new_y == y)
-                return new_y - 1;
-
-            y = new_y;
-        }
-
-        return prev_y;
-
-    }
-
-    u64 single_log_bsearch(u64 of_value, u64 base)
-    {
-        const u64 x = of_value;
-        const u64 b = base;
     
-        if(x <= 1)
-            return 0;
-        if(base <= 1)
-            return 0;
-
-        const u64 log2x = find_last_set_bit(x);
-        const u64 log2b = find_last_set_bit(b);
-
-        assert(log2x != 0);
-        assert(log2b != 0);
-
-        const u64 lower_initial_estimate = log2x / (log2b + 1);
-        const u64 higher_initial_estimate = (log2x + log2b) / (log2b);
-
-        u64 curr_lo = lower_initial_estimate;
-        u64 curr_hi = higher_initial_estimate;
-
-        while(true)
-        {
-            u64 mid = (curr_lo + curr_hi) / 2;
-            u64 curr_approx = single_pow_by_squaring(b, mid);
-
-            if(curr_approx > x)
-                curr_hi = mid;
-            else if(curr_approx < x)
-                curr_lo = mid + 1;
-            else
-                return mid;
-
-            if(curr_hi <= curr_lo)
-                break;
-        }
-
-        return curr_lo - 1;
-    }
 
     runtime_proc test_misc(Random_Generator* generator, size_t random_runs)
     {
@@ -483,7 +326,7 @@ namespace tiny_num::test
         assert(single_root_shifting(0, 0) == 1);
         assert(single_root_shifting(1, 0) == 1);
         assert(single_root_shifting(4096, 6) == 4);
-        assert(single_root_shifting(18446744073709551614, 17) == 13);
+        assert(single_root_shifting(18446744073709551614, 17ull) == 13);
 
         assert(single_root_newton(8, 3) == 2);
         assert(single_root_newton(9, 3) == 2);
@@ -549,7 +392,7 @@ namespace tiny_num::test
         let val_dist = make_exponential_distribution<u64>(min, max);
 
         assert(cast(u64) 1 << 42 == 4398046511104);
-        assert(single_log_heyley(4398046511104, 2) == 42);
+        assert(single_log_heyley(4398046511104ull, 2ull) == 42);
 
         for(size_t i = 0; i < random_runs; i++)
         {
@@ -578,7 +421,7 @@ namespace tiny_num::test
                 //most of the time (maybe always) the diff is exactly zero 
                 // yet we still want to be sure this test wont break randomly
                 double epsilon = 0.00000000001;
-                double ref_ipow = pow(rooted, power);
+                double ref_ipow = std::pow(rooted, power);
                 double powed_low_d = cast(double) powed_low;
 
                 double diff = abs(ref_ipow - powed_low_d);
@@ -599,34 +442,32 @@ namespace tiny_num::test
     }
 
     template <typename T>
-    runtime_proc test_add_overflow(Memory_Resource* memory, Random_Generator* generator, size_t random_runs)
+    runtime_proc test_add_overflow(Random_Generator* generator, size_t random_runs)
     {
         using Res = Batch_Op_Result;
         using umax = umax;
-        using Vector = Vector<T>;
-        using Padded = Padded_Vector<T>;
+        using POD_Vector = POD_Vector<T>;
+        using Padded = Padded_POD_Vector<T>;
         using CSlice = Slice<const T>;
         using Slice = Slice<T>;
 
-        Memory_Resource* resource = memory;
-
         runtime_proc test_add_overflow_batch = [&](umax left_, umax right_, umax carry_in, Res expected, bool check_overflow = true) -> bool {
-            Vector left = make_vector_of_digits<T>(left_, resource);
-            Vector right = make_vector_of_digits<T>(right_, resource);
-            Vector out = make_sized_vector<T>(MAX_TYPE_SIZE_FRACTION<T> + 1, resource);
+            POD_Vector left = make_vector_of_digits<T>(left_);
+            POD_Vector right = make_vector_of_digits<T>(right_);
+            POD_Vector out = make_sized_vector<T>(MAX_TYPE_SIZE_FRACTION<T> + 1);
 
-            Padded pad_left = make_padded_vector_of_digits<T>(left_, resource, 1);
-            Padded pad_right = make_padded_vector_of_digits<T>(right_, resource, 1);
+            Padded pad_left = make_padded_vector_of_digits<T>(left_, 1);
+            Padded pad_right = make_padded_vector_of_digits<T>(right_, 1);
 
-            Slice out_s = to_slice<T>(&out);
-            Slice pad_left_s = to_slice<T>(&pad_left.vector);
-            Slice pad_right_s = to_slice<T>(&pad_right.vector);
+            Slice out_s = slice<T>(&out);
+            Slice pad_left_s = slice<T>(&pad_left.vector);
+            Slice pad_right_s = slice<T>(&pad_right.vector);
 
-            let loc = Op_Location::OUT_OF_PLACE;
+            let loc = Location::OUT_OF_PLACE;
 
-            let res1 = ::batch_add_overflow_long<T>(&out_s,  to_slice(left), to_slice(right), loc, cast(T) carry_in);
-            let res2 = ::batch_add_overflow_long<T>(&pad_left_s, content(pad_left), to_slice(right), loc, cast(T) carry_in); //test self assign
-            let res3 = ::batch_add_overflow_long<T>(&pad_right_s, to_slice(left), content(pad_right), loc, cast(T) carry_in); 
+            let res1 = batch_add_overflow_long<T>(&out_s,  slice(left), slice(right), loc, cast(T) carry_in);
+            let res2 = batch_add_overflow_long<T>(&pad_left_s, content(pad_left), slice(right), loc, cast(T) carry_in); //test self assign
+            let res3 = batch_add_overflow_long<T>(&pad_right_s, slice(left), content(pad_right), loc, cast(T) carry_in); 
 
             Slice res1_s = res1.slice;
             Slice res2_s = res2.slice;
@@ -645,9 +486,9 @@ namespace tiny_num::test
                 *last(&res3_s) = res3.overflow;
             }
 
-            let num1 = unwrap(to_number(res1_s));
-            let num2 = unwrap(to_number(res2_s));
-            let num3 = unwrap(to_number(res3_s));
+            let num1 = to_number(res1_s);
+            let num2 = to_number(res2_s);
+            let num3 = to_number(res3_s);
 
             bool outputs_match = 
                 num1 == expected.value && 
@@ -688,14 +529,14 @@ namespace tiny_num::test
 
             umax expected = adjusted_left + adjusted_single;
 
-            mut left1 = make_vector_of_digits<T>(adjusted_left, resource); 
-            mut left2 = make_vector_of_digits<T>(adjusted_left, resource);
+            mut left1 = make_vector_of_digits<T>(adjusted_left); 
+            mut left2 = make_vector_of_digits<T>(adjusted_left);
 
-            Slice left1_s = to_slice(&left1);
-            Slice left2_s = to_slice(&left2);
+            Slice left1_s = slice(&left1);
+            Slice left2_s = slice(&left2);
 
-            let res2 = batch_add_overflow_long<T>(&left1_s, left1_s, adjusted_single, Op_Location::IN_PLACE);
-            let res1 = batch_add_overflow_long<T>(&left2_s, left2_s, Slice{&adjusted_single, 1}, Op_Location::IN_PLACE);
+            let res2 = batch_add_overflow_short<T>(&left1_s, left1_s, adjusted_single, Location::IN_PLACE);
+            let res1 = batch_add_overflow_long<T>(&left2_s, left2_s, Slice{&adjusted_single, 1}, Location::IN_PLACE);
 
             bool slices = is_equal<T>(res1.slice, res2.slice);
             bool overflows = res1.overflow == res2.overflow;
@@ -744,35 +585,32 @@ namespace tiny_num::test
             assert(test_single_add(left, cast(T) right));
         };
     }
-
     
     template <typename T>
-    runtime_proc test_sub_overflow(Memory_Resource* memory, Random_Generator* generator, size_t random_runs)
+    runtime_proc test_sub_overflow(Random_Generator* generator, size_t random_runs)
     {
         using Res = Batch_Op_Result;
         using umax = umax;
-        using Vector = Vector<T>;
-        using Padded = Padded_Vector<T>;
+        using POD_Vector = POD_Vector<T>;
+        using Padded = Padded_POD_Vector<T>;
         using CSlice = Slice<const T>;
         using Slice = Slice<T>;
 
-        Memory_Resource* resource = memory;
-
         runtime_proc test_sub_overflow_batch = [&](umax left_, umax right_, umax carry_in, Res expected, bool check_overflow = true) -> bool {
-            Vector left = make_vector_of_digits<T>(left_, resource);
-            Vector right = make_vector_of_digits<T>(right_, resource);
-            Vector out = make_sized_vector<T>(MAX_TYPE_SIZE_FRACTION<T> + 1, resource);
+            POD_Vector left = make_vector_of_digits<T>(left_);
+            POD_Vector right = make_vector_of_digits<T>(right_);
+            POD_Vector out = make_sized_vector<T>(MAX_TYPE_SIZE_FRACTION<T> + 1);
 
-            Padded pad_left = make_padded_vector_of_digits<T>(left_, resource, 1);
-            Padded pad_right = make_padded_vector_of_digits<T>(right_, resource, 1);
+            Padded pad_left = make_padded_vector_of_digits<T>(left_, 1);
+            Padded pad_right = make_padded_vector_of_digits<T>(right_, 1);
 
-            Slice out_s = to_slice<T>(&out);
-            Slice pad_left_s = to_slice<T>(&pad_left.vector);
+            Slice out_s = slice<T>(&out);
+            Slice pad_left_s = slice<T>(&pad_left.vector);
 
-            let loc = Op_Location::OUT_OF_PLACE;
+            let loc = Location::OUT_OF_PLACE;
 
-            let res1 = ::batch_sub_overflow_long<T>(&out_s,  to_slice(left), to_slice(right), loc, cast(T) carry_in);
-            let res2 = ::batch_sub_overflow_long<T>(&pad_left_s, content(pad_left), to_slice(right), loc, cast(T) carry_in); //test self assign
+            let res1 = batch_sub_overflow_long<T>(&out_s,  slice(left), slice(right), loc, cast(T) carry_in);
+            let res2 = batch_sub_overflow_long<T>(&pad_left_s, content(pad_left), slice(right), loc, cast(T) carry_in); //test self assign
 
             Slice res1_s = res1.slice;
             Slice res2_s = res2.slice;
@@ -780,8 +618,8 @@ namespace tiny_num::test
             if(check_overflow == false)
                 assert(left_ >= right_ && "must not overflow when auto testing");
 
-            let num1 = unwrap(to_number(res1_s));
-            let num2 = unwrap(to_number(res2_s));
+            let num1 = to_number(res1_s);
+            let num2 = to_number(res2_s);
 
             bool outputs_match =    num1 == expected.value && num2 == expected.value;
             bool overflows_match =  res1.overflow == res2.overflow;
@@ -851,33 +689,31 @@ namespace tiny_num::test
     }
 
     template <typename T>
-    runtime_proc test_complement_overflow(Memory_Resource* memory, Random_Generator* generator, size_t random_runs)
+    runtime_proc test_complement_overflow(Random_Generator* generator, size_t random_runs)
     {
         using Res = Batch_Op_Result;
         using umax = umax;
-        using Vector = Vector<T>;
-        using Padded = Padded_Vector<T>;
+        using POD_Vector = POD_Vector<T>;
+        using Padded = Padded_POD_Vector<T>;
         using CSlice = Slice<const T>;
         using Slice = Slice<T>;
 
-        Memory_Resource* resource = memory;
-
         //we dont test oveflow of this op 
         runtime_proc batch_complement_overflow = [&](umax left_, umax carry_in = 1) -> umax{
-            Padded pad_left = make_padded_vector_of_digits<T>(left_, resource, 1);
-            Vector out = make_sized_vector<T>(MAX_TYPE_SIZE_FRACTION<T> + 1, resource);
+            Padded pad_left = make_padded_vector_of_digits<T>(left_, 1);
+            POD_Vector out = make_sized_vector<T>(MAX_TYPE_SIZE_FRACTION<T> + 1);
 
             Slice left_s = content(&pad_left);
-            Slice out_s = to_slice<T>(&out);
-            Slice pad_left_s = to_slice<T>(&pad_left.vector);
+            Slice out_s = slice<T>(&out);
+            Slice pad_left_s = slice<T>(&pad_left.vector);
 
-            let loc = Op_Location::OUT_OF_PLACE;
+            let loc = Location::OUT_OF_PLACE;
 
-            let res1 = ::batch_complement_overflow<T>(&out_s, left_s, cast(T) carry_in);
-            let res2 = ::batch_complement_overflow<T>(&pad_left_s, left_s, cast(T) carry_in); //test self assign
+            let res1 = tiny_num::batch_complement_overflow<T>(&out_s, left_s, cast(T) carry_in);
+            let res2 = tiny_num::batch_complement_overflow<T>(&pad_left_s, left_s, cast(T) carry_in); //test self assign
 
-            let num1 = unwrap(to_number(res1.slice));
-            let num2 = unwrap(to_number(res2.slice));
+            let num1 = to_number(res1.slice);
+            let num2 = to_number(res2.slice);
 
             assert(res1.slice.size == res2.slice.size && "self assign must work correctly");
             assert(num1 == num2 && "self assign must work correctly");
@@ -931,24 +767,22 @@ namespace tiny_num::test
     }
 
     template <typename T>
-    runtime_proc test_shift_overflow(Memory_Resource* memory, Random_Generator* generator, size_t random_runs)
+    runtime_proc test_shift_overflow(Random_Generator* generator, size_t random_runs)
     {
         using Res = Batch_Op_Result;
         using umax = umax;
-        using Vector = Vector<T>;
-        using Padded = Padded_Vector<T>;
+        using POD_Vector = POD_Vector<T>;
+        using Padded = Padded_POD_Vector<T>;
         using CSlice = Slice<const T>;
         using Slice = Slice<T>;
 
-        Memory_Resource* resource = memory;
-
         runtime_proc shift_both = [&](umax left_, umax right, umax carry_in, bool up_down, Iter_Direction direction) -> Batch_Op_Result{
-            Padded pad_left = make_padded_vector_of_digits<T>(left_, resource, 1);
-            Vector out = make_sized_vector<T>(MAX_TYPE_SIZE_FRACTION<T> + 1, resource);
+            Padded pad_left = make_padded_vector_of_digits<T>(left_, 1);
+            POD_Vector out = make_sized_vector<T>(MAX_TYPE_SIZE_FRACTION<T> + 1);
 
             Slice left_s = content(&pad_left);
-            Slice out_s = to_slice<T>(&out);
-            Slice whole = to_slice<T>(&pad_left.vector);
+            Slice out_s = slice<T>(&out);
+            Slice whole = slice<T>(&pad_left.vector);
 
             Slice pad_left_s;
             if(direction == Iter_Direction::FORWARD)
@@ -961,17 +795,17 @@ namespace tiny_num::test
 
             if(up_down)
             {
-                res1 = ::batch_shift_up_overflow<T>(&out_s, left_s, right, direction, cast(T) carry_in);
-                res2 = ::batch_shift_up_overflow<T>(&pad_left_s, left_s, right, direction, cast(T) carry_in);
+                res1 = batch_shift_up_overflow<T>(&out_s, left_s, right, direction, cast(T) carry_in);
+                res2 = batch_shift_up_overflow<T>(&pad_left_s, left_s, right, direction, cast(T) carry_in);
             }
             else
             {
-                res1 = ::batch_shift_down_overflow<T>(&out_s, left_s, right, direction, cast(T) carry_in);
-                res2 = ::batch_shift_down_overflow<T>(&pad_left_s, left_s, right, direction, cast(T) carry_in);
+                res1 = batch_shift_down_overflow<T>(&out_s, left_s, right, direction, cast(T) carry_in);
+                res2 = batch_shift_down_overflow<T>(&pad_left_s, left_s, right, direction, cast(T) carry_in);
             }
 
-            let num1 = unwrap(to_number(res1.slice));
-            let num2 = unwrap(to_number(res2.slice));
+            let num1 = to_number(res1.slice);
+            let num2 = to_number(res2.slice);
 
             assert(res1.slice.size == res2.slice.size && "self assign must work correctly");
             assert(res1.overflow == res2.overflow);
@@ -1073,27 +907,25 @@ namespace tiny_num::test
     }
 
     template <typename T>
-    runtime_proc test_mul_overflow(Memory_Resource* memory, Random_Generator* generator, size_t random_runs, size_t controlled_runs)
+    runtime_proc test_mul_overflow(Random_Generator* generator, size_t random_runs, size_t controlled_runs)
     {
         using Res = Batch_Op_Result;
         using umax = umax;
-        using Vector = Vector<T>;
-        using Padded = Padded_Vector<T>;
+        using POD_Vector = POD_Vector<T>;
+        using Padded = Padded_POD_Vector<T>;
         using CSlice = Slice<const T>;
         using Slice = Slice<T>;
 
-        Memory_Resource* resource = memory;
-
-        runtime_proc test_mul_overflow_batch = [&](umax left_, umax right, umax carry_in, Res expected, Optim_Info optims, bool check_overflow = true) -> bool {
-            Padded pad_left = make_padded_vector_of_digits<T>(left_, resource, 1);
-            Vector out = make_sized_vector<T>(MAX_TYPE_SIZE_FRACTION<T> + 1, resource);
+        runtime_proc test_mul_overflow_batch = [&](umax left_, umax right, umax carry_in, Res expected, Optims optims, bool check_overflow = true) -> bool {
+            Padded pad_left = make_padded_vector_of_digits<T>(left_, 1);
+            POD_Vector out = make_sized_vector<T>(MAX_TYPE_SIZE_FRACTION<T> + 1);
 
             Slice left_s = content(&pad_left);
-            Slice out_s = to_slice<T>(&out);
-            Slice pad_left_s = to_slice<T>(&pad_left.vector);
+            Slice out_s = slice<T>(&out);
+            Slice pad_left_s = slice<T>(&pad_left.vector);
 
-            let res1 = ::batch_mul_overflow<T>(&out_s, left_s, cast(T) right, optims, cast(T) carry_in);
-            let res2 = ::batch_mul_overflow<T>(&pad_left_s, left_s, cast(T) right, optims, cast(T) carry_in);
+            let res1 = batch_mul_overflow<T>(&out_s, left_s, cast(T) right, optims, cast(T) carry_in);
+            let res2 = batch_mul_overflow<T>(&pad_left_s, left_s, cast(T) right, optims, cast(T) carry_in);
 
             Slice res1_s = res1.slice;
             Slice res2_s = res2.slice;
@@ -1108,8 +940,8 @@ namespace tiny_num::test
                 *last(&res2_s) = res2.overflow;
             }
 
-            let num1 = unwrap(to_number(res1_s));
-            let num2 = unwrap(to_number(res2_s));
+            let num1 = to_number(res1_s);
+            let num2 = to_number(res2_s);
 
             bool outputs_match = 
                 num1 == expected.value && 
@@ -1124,7 +956,7 @@ namespace tiny_num::test
             return outputs_match && overflows_match && sizes_match;
         };
 
-        runtime_proc auto_test_mul = [&](umax left, umax right, Optim_Info optims) -> bool
+        runtime_proc auto_test_mul = [&](umax left, umax right, Optims optims) -> bool
         {
             let adjusted = adjust_to_not_mul_overflow(left, right);
             return test_mul_overflow_batch(adjusted.left, adjusted.right, 0, Res{adjusted.left * adjusted.right, 0}, optims, false);
@@ -1144,7 +976,7 @@ namespace tiny_num::test
                 assert(test_mul_overflow_batch(25, 5, 0, Res{125, 0}, optims));
                 assert(test_mul_overflow_batch(0xFF, 0x10, 0, Res{0xF0, 0xF}, optims));
 
-                assert((single_mul_overflow<T>(0xFF, 0x10, 0xC) == Overflow<T>{0xFC, 0xF}));
+                assert((single_mul_overflow<T>(0xFF, 0x10, 0xC) == Single_Overflow<T>{0xFC, 0xF}));
                 assert(test_mul_overflow_batch(0xFFEE, 0x80, 0, Res{0xF700, 0x7F}, optims));
                 assert(test_mul_overflow_batch(0xFFEE, 0x80, 0, Res{0xF700, 0x7F}, optims));
                 assert(test_mul_overflow_batch(0xA1, 0x11, 0, Res{0xB1, 0xA}, optims));
@@ -1155,7 +987,7 @@ namespace tiny_num::test
             }
         }
 
-        assert(auto_test_mul(0x14156f, 0x3c, Optim_Info{}));
+        assert(auto_test_mul(0x14156f, 0x3c, Optims{}));
 
         let exponential = make_exponential_distribution<T, umax>();
         let uniform = std::uniform_int_distribution<long long>(0, FULL_MASK<T> >> 1);
@@ -1169,34 +1001,32 @@ namespace tiny_num::test
     }
 
     template <typename T>
-    runtime_proc test_div_overflow_low(Memory_Resource* memory, Random_Generator* generator, size_t random_runs, size_t controlled_runs)
+    runtime_proc test_div_overflow(Random_Generator* generator, size_t random_runs, size_t controlled_runs)
     {
         using Res = Batch_Op_Result;
         using umax = umax;
-        using Vector = Vector<T>;
-        using Padded = Padded_Vector<T>;
+        using POD_Vector = POD_Vector<T>;
+        using Padded = Padded_POD_Vector<T>;
         using CSlice = Slice<const T>;
         using Slice = Slice<T>;
 
-        assert((single_div_overflow<T>(0x12, 0x0A, 0) == Overflow<T>{1, 0x08}));
+        assert((single_div_overflow<T>(0x12, 0x0A, 0) == Single_Overflow<T>{1, 0x08}));
 
-        Memory_Resource* resource = memory;
-
-        runtime_proc test_div_overflow_low_batch = [&](umax left_, umax right, umax carry_in, Res expected, Optim_Info optims) -> bool {
+        runtime_proc test_div_overflow_batch = [&](umax left_, umax right, umax carry_in, Res expected, Optims optims) -> bool {
             constexpr size_t padding_before = 2;
 
-            Padded pad_left = make_padded_vector_of_digits<T>(left_, resource, 1);
-            Vector out = make_sized_vector<T>(MAX_TYPE_SIZE_FRACTION<T> + 1, resource);
+            Padded pad_left = make_padded_vector_of_digits<T>(left_, 1);
+            POD_Vector out = make_sized_vector<T>(MAX_TYPE_SIZE_FRACTION<T> + 1);
 
             Slice left_s = content(&pad_left);
-            Slice out_s = to_slice<T>(&out);
-            Slice pad_left_s = slice(to_slice<T>(&pad_left.vector), 1);
+            Slice out_s = slice<T>(&out);
+            Slice pad_left_s = slice(slice<T>(&pad_left.vector), 1);
 
-            let res1 = ::batch_div_overflow<T>(&out_s, left_s, cast(T) right, optims, cast(T) carry_in);
-            let res2 = ::batch_div_overflow<T>(&pad_left_s, left_s, cast(T) right, optims, cast(T) carry_in);
+            let res1 = batch_div_overflow<T>(&out_s, left_s, cast(T) right, optims, cast(T) carry_in);
+            let res2 = batch_div_overflow<T>(&pad_left_s, left_s, cast(T) right, optims, cast(T) carry_in);
 
-            let num1 = unwrap(to_number(res1.slice));
-            let num2 = unwrap(to_number(res2.slice));
+            let num1 = to_number(res1.slice);
+            let num2 = to_number(res2.slice);
 
             bool outputs_match = 
                 num1 == expected.value && 
@@ -1211,7 +1041,7 @@ namespace tiny_num::test
             return outputs_match && overflows_match && sizes_match;
         };
     
-        runtime_proc auto_test_div = [&](umax left, umax right, Optim_Info optims) -> bool {
+        runtime_proc auto_test_div = [&](umax left, umax right, Optims optims) -> bool {
             if(right == 0)
                 return true;
         
@@ -1224,7 +1054,7 @@ namespace tiny_num::test
             // we dont test this yet because the setup would basically exactly mirror of the operation
             // (because its dependent on the template type)
 
-            return test_div_overflow_low_batch(left, adjusted_right, 0, Res{res, rem}, optims);
+            return test_div_overflow_batch(left, adjusted_right, 0, Res{res, rem}, optims);
         };
 
         if constexpr(std::is_same_v<T, u8>)
@@ -1232,25 +1062,25 @@ namespace tiny_num::test
             for(size_t i = 0; i < controlled_runs; i++)
             {
                 let optims = generate_random_optims(generator);
-                assert(test_div_overflow_low_batch(0, 1, 0, Res{0, 0}, optims));
-                assert(test_div_overflow_low_batch(1, 1, 0, Res{1, 0}, optims));
-                assert(test_div_overflow_low_batch(25, 1, 0, Res{25, 0}, optims));
-                assert(test_div_overflow_low_batch(25, 5, 0, Res{5, 0}, optims));
-                assert(test_div_overflow_low_batch(0xFF, 0x08, 0, Res{31, 7}, optims));
-                assert(test_div_overflow_low_batch(0xA1, 0x0F, 0, Res{10, 11}, optims));
-                assert(test_div_overflow_low_batch(0xA1C0, 0x08, 0x1, Res{0x3438, 0}, optims));
-                assert(test_div_overflow_low_batch(0xABCDEF00, 1, 0, Res{0xABCDEF00, 0}, optims));
-                assert(test_div_overflow_low_batch(0x99AA, 0x08, 0x9, Res{0x3335, 2}, optims));
-                assert(test_div_overflow_low_batch(0xABCDEF00, 0x07, 0xC, Res{0xcf668fdb, 0x3}, optims));
+                assert(test_div_overflow_batch(0, 1, 0, Res{0, 0}, optims));
+                assert(test_div_overflow_batch(1, 1, 0, Res{1, 0}, optims));
+                assert(test_div_overflow_batch(25, 1, 0, Res{25, 0}, optims));
+                assert(test_div_overflow_batch(25, 5, 0, Res{5, 0}, optims));
+                assert(test_div_overflow_batch(0xFF, 0x08, 0, Res{31, 7}, optims));
+                assert(test_div_overflow_batch(0xA1, 0x0F, 0, Res{10, 11}, optims));
+                assert(test_div_overflow_batch(0xA1C0, 0x08, 0x1, Res{0x3438, 0}, optims));
+                assert(test_div_overflow_batch(0xABCDEF00, 1, 0, Res{0xABCDEF00, 0}, optims));
+                assert(test_div_overflow_batch(0x99AA, 0x08, 0x9, Res{0x3335, 2}, optims));
+                assert(test_div_overflow_batch(0xABCDEF00, 0x07, 0xC, Res{0xcf668fdb, 0x3}, optims));
                 //for carry in the result is obtained as follows:
                 // left:  0x0ABCDEF00 
                 // carry: 0xC00000000
                 // eff:   0xCABCDEF00 
                 // eff / right = 0x1CF668FDB => 0xCF668FDB (removal of the added - carried digit)
                 // eff % right = 0x3
-                assert(test_div_overflow_low_batch(0xABCDEF00, 0x07, 0, Res{411771428, 4}, optims));
-                assert(test_div_overflow_low_batch(0xABCDEF00, 0x0F, 0, Res{192160000, 0}, optims));
-                assert(test_div_overflow_low_batch(13745, 0xB, 0, Res{1249, 6}, optims));
+                assert(test_div_overflow_batch(0xABCDEF00, 0x07, 0, Res{411771428, 4}, optims));
+                assert(test_div_overflow_batch(0xABCDEF00, 0x0F, 0, Res{192160000, 0}, optims));
+                assert(test_div_overflow_batch(13745, 0xB, 0, Res{1249, 6}, optims));
             }
         }
 
@@ -1266,82 +1096,80 @@ namespace tiny_num::test
     }
 
     template <typename T>
-    runtime_proc test_mul_quadratic(Memory_Resource* memory, Random_Generator* generator, size_t random_runs)
+    runtime_proc test_mul(Random_Generator* generator, size_t random_runs)
     {
         using Res = Batch_Op_Result;
         using umax = umax;
-        using Vector = Vector<T>;
-        using Padded = Padded_Vector<T>;
+        using POD_Vector = POD_Vector<T>;
+        using Padded = Padded_POD_Vector<T>;
         using CSlice = Slice<const T>;
         using Slice = Slice<T>;
 
-        Memory_Resource* resource = memory;
+        runtime_proc test_fused_mul_add = [&](umax left_, umax right_, umax coef, umax expected, Optims optims = Optims{}) -> bool{
+            POD_Vector left = make_vector_of_digits<T>(left_);
+            POD_Vector right = make_vector_of_digits<T>(right_);
+            POD_Vector output = make_sized_vector<T>(size(left));
 
-        runtime_proc test_fused_mul_add = [&](umax left_, umax right_, umax coef, umax expected, Optim_Info optims = Optim_Info{}) -> bool{
-            Vector left = make_vector_of_digits<T>(left_, resource);
-            Vector right = make_vector_of_digits<T>(right_, resource);
-            Vector output = make_sized_vector<T>(size(left), resource);
+            Slice left_s = slice(&left);
+            Slice right_s = slice(&right);
+            Slice output_s = slice(&output);
 
-            Slice left_s = to_slice(&left);
-            Slice right_s = to_slice(&right);
-            Slice output_s = to_slice(&output);
-
-            let res_out = ::batch_fused_mul_add_overflow<T>(&output_s, left_s, right_s, cast(T) coef, optims, Op_Location::OUT_OF_PLACE);
-            let res_in = ::batch_fused_mul_add_overflow<T>(&left_s, left_s, right_s, cast(T) coef, optims, Op_Location::IN_PLACE);
+            let res_out = batch_fused_mul_add_overflow<T>(&output_s, left_s, right_s, cast(T) coef, optims, Location::OUT_OF_PLACE);
+            let res_in = batch_fused_mul_add_overflow<T>(&left_s, left_s, right_s, cast(T) coef, optims, Location::IN_PLACE);
         
             push_back(&output, res_out.overflow);
             push_back(&left, res_in.overflow);
 
-            left_s = to_slice(&left);
-            output_s = to_slice(&output);
+            left_s = slice(&left);
+            output_s = slice(&output);
 
-            let num_out = unwrap(to_number(left_s));
-            let num_in = unwrap(to_number(output_s));
+            let num_out = to_number(left_s);
+            let num_in = to_number(output_s);
 
             return expected == num_out && expected == num_in; 
         };
 
-        runtime_proc auto_test_fused_mul_add = [&](umax left, umax right, umax coef, Optim_Info optims = Optim_Info{}) -> bool{
+        runtime_proc auto_test_fused_mul_add = [&](umax left, umax right, umax coef, Optims optims = Optims{}) -> bool{
             return test_fused_mul_add(left, right, coef, left + coef*right, optims);
         };
 
-        runtime_proc test_mul_quadratic = [&](umax left_, umax right_, umax expected, Optim_Info optims = Optim_Info{}) -> bool{
-            Vector left = make_vector_of_digits<T>(left_, resource);
-            Vector right = make_vector_of_digits<T>(right_, resource);
+        runtime_proc test_mul = [&](umax left_, umax right_, umax expected, Optims optims = Optims{}) -> bool{
+            POD_Vector left = make_vector_of_digits<T>(left_);
+            POD_Vector right = make_vector_of_digits<T>(right_);
 
             size_t to_size = required_mul_out_size(size(left), size(right));
             size_t aux_size1 = required_mul_quadratic_aux_size(size(left), size(right));
-            size_t aux_size2 = required_mul_karatsuba_aux_size(size(left), size(right));
+            size_t aux_size2 = required_mul_karatsuba_aux_size(size(left), size(right), 1);
 
             size_t aux_size = max(aux_size1, aux_size2)*10; //to allow all karatsuba recursions
 
-            Vector res = make_sized_vector<T>(to_size, resource);
-            Vector aux = make_sized_vector<T>(aux_size, resource);
+            POD_Vector res = make_sized_vector<T>(to_size);
+            POD_Vector aux = make_sized_vector<T>(aux_size);
 
-            Slice res_s = to_slice(&res);
-            Slice aux_s = to_slice(&aux);
-            CSlice left_s = to_slice(left);
-            CSlice right_s = to_slice(right);
+            Slice res_s = slice(&res);
+            Slice aux_s = slice(&aux);
+            CSlice left_s = slice(left);
+            CSlice right_s = slice(right);
 
-            ::mul_quadratic<T>(&res_s, &aux_s, left_s, right_s, optims);
-            let normal = unwrap(to_number(res_s));
+            tiny_num::mul_quadratic<T>(&res_s, &aux_s, left_s, right_s, optims);
+            let normal = to_number(res_s);
 
-            ::mul_quadratic_fused<T>(&res_s, left_s, right_s, optims);
-            let fused = unwrap(to_number(res_s));
+            tiny_num::mul_quadratic_fused<T>(&res_s, left_s, right_s, optims);
+            let fused = to_number(res_s);
 
-            ::mul_karatsuba<T>(&res_s, &aux_s, left_s, right_s, optims);
-            let karatsuba = unwrap(to_number(res_s));
+            tiny_num::mul_karatsuba<T>(&res_s, &aux_s, left_s, right_s, optims);
+            let karatsuba = to_number(res_s);
 
             return expected == normal && expected == fused && expected == karatsuba;
         };
 
-        runtime_proc auto_test_mul_quadratic = [&](umax left, umax right, Optim_Info optims) -> bool
+        runtime_proc auto_test_mul = [&](umax left, umax right, Optims optims) -> bool
         {
             let adjusted = adjust_to_not_mul_overflow(left, right);
-            return test_mul_quadratic(adjusted.left, adjusted.right, adjusted.left * adjusted.right, optims);
+            return test_mul(adjusted.left, adjusted.right, adjusted.left * adjusted.right, optims);
         };
 
-        Optim_Info shift = {true, true, false};
+        Optims shift = {true, true, false};
 
         assert(test_fused_mul_add(1, 1, 1, 2));
         assert(test_fused_mul_add(1, 1, 1, 2, shift));
@@ -1352,316 +1180,154 @@ namespace tiny_num::test
         assert(auto_test_fused_mul_add(0x1000000000, 0x574ce80, 0x10, shift));
         assert(auto_test_fused_mul_add(0x0da8824af2592c00, 0x0da8824af2592c00, 0x2, shift));
         
-        assert(test_mul_quadratic(0, 0, 0));
-        assert(test_mul_quadratic(1, 0, 0));
-        assert(test_mul_quadratic(0, 1, 0));
-        assert(test_mul_quadratic(1, 1, 1));
-        assert(test_mul_quadratic(25, 1, 25));
-        assert(test_mul_quadratic(25, 5, 125));
-        assert(test_mul_quadratic(0xFF, 0x10, 0xFF0));
-        assert(test_mul_quadratic(0xA1, 0x11, 0xAB1));
-        assert(test_mul_quadratic(0xABCDEF00, 1, 0xABCDEF00));
-        assert(test_mul_quadratic(0xABCDEF00, 0, 0));
-        assert(test_mul_quadratic(13745, 137, 0x1CBBB9));
-        assert(test_mul_quadratic(0xFFFF, 0x10000, 0xFFFF0000));
-        assert(test_mul_quadratic(0xABCD, 0x10001, 0xABCDABCD));
-        assert(test_mul_quadratic(0xAB, 0x1254, 0xAB*0x1254));
-        assert(test_mul_quadratic(0x1000, 0x1200, 0x1000*0x1200));
-        assert(test_mul_quadratic(0xABCD, 0x54, 0xABCD*0x54));
-        assert(test_mul_quadratic(0xABCD, 0x1254, 0xABCD*0x1254));
-        assert(test_mul_quadratic(0xABCDEF124, 0x1254, 0xC4CDA61BA7D0));
-        assert(test_mul_quadratic(0x1254, 0xABCDEF124, 0xC4CDA61BA7D0));
+        assert(test_mul(0, 0, 0));
+        assert(test_mul(1, 0, 0));
+        assert(test_mul(0, 1, 0));
+        assert(test_mul(1, 1, 1));
+        assert(test_mul(25, 1, 25));
+        assert(test_mul(25, 5, 125));
+        assert(test_mul(0xFF, 0x10, 0xFF0));
+        assert(test_mul(0xA1, 0x11, 0xAB1));
+        assert(test_mul(0xABCDEF00, 1, 0xABCDEF00));
+        assert(test_mul(0xABCDEF00, 0, 0));
+        assert(test_mul(13745, 137, 0x1CBBB9));
+        assert(test_mul(0xFFFF, 0x10000, 0xFFFF0000));
+        assert(test_mul(0xABCD, 0x10001, 0xABCDABCD));
+        assert(test_mul(0xAB, 0x1254, 0xAB*0x1254));
+        assert(test_mul(0x1000, 0x1200, 0x1000*0x1200));
+        assert(test_mul(0xABCD, 0x54, 0xABCD*0x54));
+        assert(test_mul(0xABCD, 0x1254, 0xABCD*0x1254));
+        assert(test_mul(0xABCDEF124, 0x1254, 0xC4CDA61BA7D0));
+        assert(test_mul(0x1254, 0xABCDEF124, 0xC4CDA61BA7D0));
 
-        assert(auto_test_mul_quadratic(0x1d15a574ce80, 0x38, shift));
-        assert(auto_test_mul_quadratic(0x1d15a574ce80, 0xFFFF, shift));
-        assert(auto_test_mul_quadratic(0x1d15a574ce80, 0x1010, shift));
-        assert(auto_test_mul_quadratic(0x1d15a574ce80, 0x7838, shift));
-        assert(auto_test_mul_quadratic(0x1d15a574ce80, 0x27838, shift));
-        assert(auto_test_mul_quadratic(60136640465, 262154, shift));
+        assert(auto_test_mul(0x1d15a574ce80, 0x38, shift));
+        assert(auto_test_mul(0x1d15a574ce80, 0xFFFF, shift));
+        assert(auto_test_mul(0x1d15a574ce80, 0x1010, shift));
+        assert(auto_test_mul(0x1d15a574ce80, 0x7838, shift));
+        assert(auto_test_mul(0x1d15a574ce80, 0x27838, shift));
+        assert(auto_test_mul(60136640465, 262154, shift));
 
         let distribution = make_exponential_distribution<T>();
         for(size_t i = 0; i < random_runs; i++)
         {
-            Optim_Info optims = generate_random_optims(generator);
+            Optims optims = generate_random_optims(generator);
             umax left = distribution(*generator);
             umax right = distribution(*generator);
 
-            assert(auto_test_mul_quadratic(left, right, optims));
+            assert(auto_test_mul(left, right, optims));
         };
     }
 
     template <typename T>
-    runtime_proc test_div_bit_by_bit(Memory_Resource* memory, Random_Generator* generator, size_t random_runs)
+    runtime_proc test_div(Random_Generator* generator, size_t random_runs)
     {
         using Res = Batch_Op_Result;
         using umax = umax;
-        using Vector = Vector<T>;
-        using Padded = Padded_Vector<T>;
+        using POD_Vector = POD_Vector<T>;
+        using Padded = Padded_POD_Vector<T>;
         using CSlice = Slice<const T>;
         using Slice = Slice<T>;
 
-        enum Will_Fail
-        {
-            FAIL,
-            OKAY
-        };
-
-        Memory_Resource* resource = memory;
-
-        runtime_proc test_div_bit_by_bit = [&](umax num_, umax den_, umax ex_quotient, umax ex_remainder, Will_Fail expected_fail = OKAY, Optim_Info optims = Optim_Info{}) -> bool{
-            Vector num = make_vector_of_digits<T>(num_, resource); 
-            Vector den = make_vector_of_digits<T>(den_, resource);
+        runtime_proc test_div = [&](umax num_, umax den_, umax ex_quotient, umax ex_remainder, Optims optims = Optims{}) -> bool{
+            POD_Vector num = make_vector_of_digits<T>(num_); 
+            POD_Vector den = make_vector_of_digits<T>(den_);
             size_t quo_size = required_div_quotient_size(size(num), size(den));
             size_t rem_size = required_div_remainder_size(size(num), size(den));
 
-            Vector quo = make_sized_vector<T>(quo_size, resource); 
-            Vector rem = make_sized_vector<T>(rem_size, resource);
+            POD_Vector quo = make_sized_vector<T>(quo_size); 
+            POD_Vector rem = make_sized_vector<T>(rem_size);
 
-            Slice quo_s = to_slice(&quo);
-            Slice rem_s = to_slice(&rem);
-            Slice num_s = to_slice(&num);
-            Slice den_s = to_slice(&den);
+            Slice quo_s = slice(&quo);
+            Slice rem_s = slice(&rem);
+            Slice num_s = slice(&num);
+            Slice den_s = slice(&den);
 
-            let div_res = ::div_bit_by_bit<T>(&quo_s, &rem_s, num_s, den_s, optims);
-            if(expected_fail == FAIL)
-                return div_res.has == false;
-
-            let unwrapped = unwrap(div_res);
-            let quotient = unwrap(to_number(unwrapped.quotient));
-            let remainder = unwrap(to_number(unwrapped.remainder));
-            return ex_quotient == quotient && ex_remainder == remainder && div_res.has;
+            let div_res = tiny_num::div<T>(&quo_s, &rem_s, num_s, den_s, optims);
+            let quotient = to_number(div_res.quotient);
+            let remainder = to_number(div_res.remainder);
+            return ex_quotient == quotient && ex_remainder == remainder;
         };
 
 
-        runtime_proc auto_test_div_bit_by_bit = [&](umax left, umax right, Optim_Info optims = Optim_Info{}) -> bool{
+        runtime_proc auto_test_div = [&](umax left, umax right, Optims optims = Optims{}) -> bool{
             if(right == 0)
-                return test_div_bit_by_bit(left, right, 0, 0, FAIL);
+                return true;;
 
             umax quotient = left / right;
             umax remainder = left % right;
-            return test_div_bit_by_bit(left, right, quotient, remainder, OKAY, optims);
+            return test_div(left, right, quotient, remainder, optims);
         };
 
-        assert(test_div_bit_by_bit(0, 0, 0, 0, FAIL));
-        assert(test_div_bit_by_bit(1, 0, 0, 0, FAIL));
-        assert(test_div_bit_by_bit(0, 1, 0, 0, OKAY));
-        assert(test_div_bit_by_bit(1, 1, 1, 0));
-        assert(test_div_bit_by_bit(25, 1, 25, 0));
-        assert(test_div_bit_by_bit(1, 25, 0, 1));
-        assert(test_div_bit_by_bit(25, 26, 0, 25));
-        assert(test_div_bit_by_bit(25, 5, 5, 0));
-        assert(test_div_bit_by_bit(28, 5, 5, 3));
-        assert(test_div_bit_by_bit(0xFF, 0x10, 0xF, 0xF));
-        assert(test_div_bit_by_bit(183, 27, 6, 21));
-        assert(test_div_bit_by_bit(0xABCDEF00, 1, 0xABCDEF00, 0));
-        assert(test_div_bit_by_bit(0xABCDEF00, 0xABCDEF00, 1, 0));
-        assert(test_div_bit_by_bit(0xABCDEF00, 0xABCDEF10, 0, 0xABCDEF00));
-        assert(test_div_bit_by_bit(0xABCDEF00, 0, 0, 0, FAIL));
-        assert(test_div_bit_by_bit(0xAB, 0xABCD, 0, 0xAB));
-        assert(test_div_bit_by_bit(0xABCE, 0xABCD, 1, 1));
+        assert(test_div(0, 1, 0, 0));
+        assert(test_div(1, 1, 1, 0));
+        assert(test_div(25, 1, 25, 0));
+        assert(test_div(1, 25, 0, 1));
+        assert(test_div(25, 26, 0, 25));
+        assert(test_div(25, 5, 5, 0));
+        assert(test_div(28, 5, 5, 3));
+        assert(test_div(0xFF, 0x10, 0xF, 0xF));
+        assert(test_div(183, 27, 6, 21));
+        assert(test_div(0xABCDEF00, 1, 0xABCDEF00, 0));
+        assert(test_div(0xABCDEF00, 0xABCDEF00, 1, 0));
+        assert(test_div(0xABCDEF00, 0xABCDEF10, 0, 0xABCDEF00));
+        assert(test_div(0xAB, 0xABCD, 0, 0xAB));
+        assert(test_div(0xABCE, 0xABCD, 1, 1));
 
-        assert(auto_test_div_bit_by_bit(13745, 6435));
-        assert(auto_test_div_bit_by_bit(4643477, 4796));
-        assert(auto_test_div_bit_by_bit(7893, 01047));
-        assert(auto_test_div_bit_by_bit(65536, 256));
-        assert(auto_test_div_bit_by_bit(256, 65536));
-        assert(auto_test_div_bit_by_bit(256*413541, 256));
-        assert(auto_test_div_bit_by_bit(959464934, 1111));
-        assert(auto_test_div_bit_by_bit(27417318639, 57432413));
-        assert(auto_test_div_bit_by_bit(6994935563924682752, 67877739413342216));
+        assert(auto_test_div(13745, 6435));
+        assert(auto_test_div(4643477, 4796));
+        assert(auto_test_div(7893, 01047));
+        assert(auto_test_div(65536, 256));
+        assert(auto_test_div(256, 65536));
+        assert(auto_test_div(256*413541, 256));
+        assert(auto_test_div(959464934, 1111));
+        assert(auto_test_div(27417318639, 57432413));
+        assert(auto_test_div(6994935563924682752, 67877739413342216));
 
         let distribution = make_exponential_distribution<T>();
         for(size_t i = 0; i < random_runs; i++)
         {
-            Optim_Info optims = generate_random_optims(generator);
+            Optims optims = generate_random_optims(generator);
             umax left = distribution(*generator);
             umax right = distribution(*generator);
-            assert(auto_test_div_bit_by_bit(left, right, optims));
+            assert(auto_test_div(left, right, optims));
         };
     }
 
-    template <typename T>
-    void println(Slice<T> slice)
-    {
-        std::cout << "[";
-        if(slice.size > 0)
-        {
-            std::cout << cast(umax) slice[0];
-
-            for(size_t i = 1; i < slice.size; i++)
-                std::cout << ", " << cast(umax) slice[i];
-        }
-        std::cout << "]\n";
-    }
-
     template <typename Num, typename Rep, typename Conv_Fn>
-    func to_base(Slice<const Num> num, Num base, Conv_Fn conv, Optim_Info optims, Memory_Resource* resource) -> Vector<Rep> {
-        Vector<Num> temp = make_vector_of_slice<Num>(num, resource);
-        Vector<Rep> out = make_sized_vector<Rep>(required_to_base_out_size<Num>(num.size, base), resource);
+    func to_base(Slice<const Num> num, Num base, Conv_Fn conv, Optims optims) -> POD_Vector<Rep> {
+        POD_Vector<Num> temp = make_vector_of_slice<Num>(num);
+        size_t required_size = required_to_base_out_size(num.size, base, BIT_SIZE<Num>);
+        POD_Vector<Rep> out = make_sized_vector<Rep>(required_size);
 
-        Slice<Num> temp_s = to_slice(&temp);
-        Slice<Rep> out_s = to_slice(&out);
+        Slice<Num> temp_s = slice(&temp);
+        Slice<Rep> out_s = slice(&out);
 
         Slice<Rep> converted = (to_base<Num, Rep>(&out_s, &temp_s, num, base, conv, optims));
-        assert(is_striped_representation(converted));
 
         resize(&out, converted.size);
         return out;
     };
 
     template <typename Num, typename Rep, typename Conv_Fn>
-    func from_base(Slice<const Rep> rep, Num base, Conv_Fn conv, Optim_Info optims, Memory_Resource* resource) -> Vector<Num> {
-        size_t required_size = required_from_base_out_size<Num>(rep.size, base);
-        Vector<Num> out = make_sized_vector<Num>(required_size + 1, resource); //@TODO: why is there the +1
+    func from_base(Slice<const Rep> rep, Num base, Conv_Fn conv, Optims optims) -> POD_Vector<Num> {
+        size_t required_size = required_from_base_out_size(rep.size, base, BIT_SIZE<Num>);
+        POD_Vector<Num> out = make_sized_vector<Num>(required_size + 1);
 
-        Slice<Num> out_s = to_slice(&out);
-        Slice<Num> converted = from_base<Num, Rep>(&out_s, rep, base, conv, optims);
-
-        assert(is_striped_number(converted));
-        resize(&out, converted.size);
+        Slice<Num> out_s = slice(&out);
+        Optional_Slice<Num> converted = from_base<Num, Rep>(&out_s, rep, base, conv, optims);
+        assert(converted.ok && is_striped_number(converted.slice));
+        resize(&out, converted.slice.size);
         return out;
     };
 
-    func stringlen(const char* str) -> size_t
-    {
-        if(str == nullptr)
-            return 0;
-
-        size_t size = 0;
-        while(str[size] != '\0')
-            size ++;
-
-        return size;
-    }
-
-    template <typename Num = umax>
-    func to_base(Slice<const Num> num, Num base, Memory_Resource* resource) -> Vector<char> {
-        assert(base > 2);
-        assert(base <= 36);
-        let conversion = [&](Num value) -> char {
-
-            constexpr char val_to_char_table[36] = {
-                '0', '1', '2', '3', '4', '5', '6', '7', '8', '9',
-                'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J',
-                'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T',
-                'U', 'V', 'W', 'X', 'Y', 'Z'
-            };
-
-            assert(value < 36);
-            return val_to_char_table[value];
-        };
-
-        return to_base<Num, char>(num, base, conversion, Optim_Info{}, resource);
-    }
-
-    template <typename Num = umax>
-    func from_base(const char* str, Num base, Memory_Resource* resource) -> Trivial_Maybe<Vector<Num>> {
-        assert(base > 2);
-        assert(base <= 36);
-
-        proc make_table = [](){
-            std::array<Num, 255> table;
-
-            for(size_t i = 0; i < table.size(); i++)
-                table[i] = cast(Num) -1;
-
-            table['0'] = 0;
-            table['1'] = 1;
-            table['2'] = 2;
-            table['3'] = 3;
-            table['4'] = 4;
-            table['5'] = 5;
-            table['6'] = 6;
-            table['7'] = 7;
-            table['8'] = 8;
-            table['9'] = 9;
-            table['A'] = 10;
-            table['a'] = 10;
-            table['B'] = 11;
-            table['b'] = 11;
-            table['C'] = 12;
-            table['c'] = 12;
-            table['D'] = 13;
-            table['d'] = 13;
-            table['E'] = 14;
-            table['e'] = 14;
-            table['F'] = 15;
-            table['f'] = 15;
-            table['G'] = 16;
-            table['g'] = 16;
-            table['H'] = 17;
-            table['h'] = 17;
-            table['I'] = 18;
-            table['i'] = 18;
-            table['J'] = 19;
-            table['j'] = 19;
-            table['K'] = 20;
-            table['k'] = 20;
-            table['L'] = 21;
-            table['l'] = 21;
-            table['M'] = 22;
-            table['m'] = 22;
-            table['N'] = 23;
-            table['n'] = 23;
-            table['O'] = 24;
-            table['o'] = 24;
-            table['P'] = 25;
-            table['p'] = 25;
-            table['Q'] = 26;
-            table['q'] = 26;
-            table['R'] = 27;
-            table['r'] = 27;
-            table['S'] = 28;
-            table['s'] = 28;
-            table['T'] = 29;
-            table['t'] = 29;
-            table['U'] = 30;
-            table['u'] = 30;
-            table['V'] = 31;
-            table['v'] = 32;
-            table['W'] = 32;
-            table['w'] = 32;
-            table['X'] = 33;
-            table['x'] = 33;
-            table['Y'] = 34;
-            table['y'] = 34;
-            table['Z'] = 35;
-            table['z'] = 35;
-
-            return table;
-        };
-
-        constexpr std::array<Num, 255> char_to_val_table = make_table();
-
-        bool ok = true;
-        let conversion = [&](char value) -> Num {
-            Num val = char_to_val_table[value];
-            if(val == -1)
-            {
-                ok = false;
-                return 0;
-            }
-
-            return val;
-        };
-
-        Slice<const char> rep{str, stringlen(str)};
-        Vector<Num> res = from_base<Num, char>(rep, base, conversion, Optim_Info{}, resource);
-
-        if(ok)
-            return wrap(res);
-        else
-            return {};
-    }
-
     template <typename Num, typename Rep>
-    func native_to_base(umax num, Num base, Memory_Resource* resource) -> Vector<Rep> 
+    func native_to_base(umax num, Num base) -> POD_Vector<Rep> 
     {
         using umax = umax;
         constexpr size_t num_digits = digits_to_represent<Num, umax>();
-        const size_t max_size = required_to_base_out_size<Num>(num_digits, base);
+        const size_t max_size = required_to_base_out_size(num_digits, base, BIT_SIZE<Num>);
 
-        Vector<Rep> converted = make_sized_vector<Rep>(max_size, resource);
+        POD_Vector<Rep> converted = make_sized_vector<Rep>(max_size);
         size_t size = 0;
         for(umax curr_val = num; curr_val != 0; curr_val /= base, size ++)
         {
@@ -1670,7 +1336,7 @@ namespace tiny_num::test
         }
 
         resize(&converted, size);
-        Slice<Rep> converted_s = to_slice(&converted);
+        Slice<Rep> converted_s = slice(&converted);
         reverse(&converted_s);
 
         return converted;
@@ -1680,7 +1346,6 @@ namespace tiny_num::test
     func native_from_base(Slice<const Rep> rep, Num base) -> umax 
     {
         using umax = umax;
-        assert(is_striped_representation(rep));
 
         umax value = 0;
         for(size_t i = 0; i < rep.size; i++)
@@ -1697,71 +1362,65 @@ namespace tiny_num::test
     };
 
     template <typename Num, typename Rep>
-    runtime_proc test_to_base(Memory_Resource* memory, Random_Generator* generator, size_t random_runs)
+    runtime_proc test_to_base(Random_Generator* generator, size_t random_runs)
     {
         static_assert(sizeof(Num) >= sizeof(Rep));
         using umax = umax;
 
-        Memory_Resource* resource = memory;
-
         proc id_to_conversion = [](Num num) -> Rep {return cast(Rep) num;};
         proc id_from_conversion = [](Rep num) -> Num {return cast(Num) num;};
 
-        runtime_proc test_to_base = [&](Slice<const Num> num, Num base, Slice<const Rep> expected_rep, Optim_Info optims) -> bool 
+        runtime_proc test_to_base = [&](Slice<const Num> num, Num base, Slice<const Rep> expected_rep, Optims optims) -> bool 
         {
-            Vector<Rep> converted = to_base<Num, Rep>(num, base, id_to_conversion, optims, resource);
-            assert(is_striped_representation(expected_rep));
+            POD_Vector<Rep> converted = to_base<Num, Rep>(num, base, id_to_conversion, optims);
 
-            return is_equal<Rep>(to_slice(converted), expected_rep);
+            return is_equal<Rep>(slice(converted), expected_rep);
         };
 
-        runtime_proc manual_test_to_base = [&](umax num, Num base, std::initializer_list<Rep> expected_rep, Optim_Info optims = Optim_Info{}) -> bool 
+        runtime_proc manual_test_to_base = [&](umax num, Num base, std::initializer_list<Rep> expected_rep, Optims optims = Optims{}) -> bool 
         {
-            Vector<Num> num_ = make_vector_of_digits<Num>(num, resource);
+            POD_Vector<Num> num_ = make_vector_of_digits<Num>(num);
             Slice<const Rep> expected_rep_s = {std::data(expected_rep), std::size(expected_rep)};
-            return test_to_base(to_slice(num_), base, expected_rep_s, optims);
+            return test_to_base(slice(num_), base, expected_rep_s, optims);
         };
 
-        runtime_proc auto_test_to_base = [&](umax num, Num base, Optim_Info optims) -> bool 
+        runtime_proc auto_test_to_base = [&](umax num, Num base, Optims optims) -> bool 
         {
-            Vector<Num> num_ = make_vector_of_digits<Num>(num, resource);
-            Vector<Rep> expected_rep = native_to_base<Num, Rep>(num, base, resource);
-            return test_to_base(to_slice(num_), base, to_slice(expected_rep), optims);
+            POD_Vector<Num> num_ = make_vector_of_digits<Num>(num);
+            POD_Vector<Rep> expected_rep = native_to_base<Num, Rep>(num, base);
+            return test_to_base(slice(num_), base, slice(expected_rep), optims);
         };
 
-        runtime_proc test_from_base = [&](Slice<const Rep> rep, Num base, Slice<const Num> expected_num, Optim_Info optims) -> bool 
+        runtime_proc test_from_base = [&](Slice<const Rep> rep, Num base, Slice<const Num> expected_num, Optims optims) -> bool 
         {
-            Vector<Num> num = from_base<Num, Rep>(rep, base, id_from_conversion, optims, resource);
+            POD_Vector<Num> num = from_base<Num, Rep>(rep, base, id_from_conversion, optims);
         
-            assert(is_striped_representation(expected_num));
-            assert(is_striped_representation(to_slice(num)));
-
-            return is_equal<Num>(to_slice(num), expected_num);
+            return is_equal<Num>(slice(num), expected_num);
         };
 
-        runtime_proc manual_test_from_base = [&](std::initializer_list<Rep> rep, Num base, umax expected_num, Optim_Info optims = Optim_Info{}) -> bool 
+        runtime_proc manual_test_from_base = [&](std::initializer_list<Rep> rep, Num base, umax expected_num, Optims optims = Optims{}) -> bool 
         {
-            Vector<Num> expected_num_ = make_vector_of_digits<Num>(expected_num, resource);
+            POD_Vector<Num> expected_num_ = make_vector_of_digits<Num>(expected_num);
             Slice<const Rep> rep_s = {std::data(rep), std::size(rep)};
-            return test_from_base(rep_s, base, to_slice(expected_num_), optims);
+            return test_from_base(rep_s, base, slice(expected_num_), optims);
         };
 
-        runtime_proc auto_test_from_base = [&](Slice<const Rep> rep, Num base, Optim_Info optims) -> bool 
+        runtime_proc auto_test_from_base = [&](Slice<const Rep> rep, Num base, Optims optims) -> bool 
         {
             umax num = native_from_base<Num, Rep>(rep, base);
-            Vector<Num> expected_num = make_vector_of_digits<Num>(num, resource);
-            return test_from_base(rep, base, to_slice(expected_num), optims);
+            POD_Vector<Num> expected_num = make_vector_of_digits<Num>(num);
+            return test_from_base(rep, base, slice(expected_num), optims);
         };
 
-        runtime_proc test_to_and_fro = [&](umax value, Num base, Optim_Info optims) -> bool
+        runtime_proc test_to_and_fro = [&](umax value, Num base, Optims optims) -> bool
         {
-            Vector<Num> initial = make_vector_of_digits<Num>(value, resource);
-            let rep = to_base<Num, Rep>(to_slice(initial), base, id_to_conversion, optims, resource);
-            let num = from_base<Num, Rep>(to_slice(rep), base, id_from_conversion, optims, resource);
-            Slice<const Num> num_s = to_slice(num);
-            let obtained_value = unwrap(to_number(num_s));
+            POD_Vector<Num> initial = make_vector_of_digits<Num>(value);
+            let rep = to_base<Num, Rep>(slice(initial), base, id_to_conversion, optims);
+            let num = from_base<Num, Rep>(slice(rep), base, id_from_conversion, optims);
+            Slice<const Num> num_s = slice(num);
+            let obtained_value = to_number(num_s);
 
-            bool match = is_equal<Num>(to_slice(num), to_slice(initial));
+            bool match = is_equal<Num>(slice(num), slice(initial));
             return match;
         };
 
@@ -1791,19 +1450,19 @@ namespace tiny_num::test
         assert((manual_test_from_base({1,5,2,6,2,1,1}, 9, 844354)));
         assert((manual_test_from_base({8,4,4,3,5,4}, 10, 844354)));
 
-        assert((test_to_and_fro(10, 2, Optim_Info{})));
-        assert((test_to_and_fro(59180470887883776, 3, Optim_Info{})));
+        assert((test_to_and_fro(10, 2, Optims{})));
+        assert((test_to_and_fro(59180470887883776, 3, Optims{})));
 
         let num_dist = make_exponential_distribution<Num>();
         constexpr size_t max_1 = std::numeric_limits<Rep>::max() >> HALF_BIT_SIZE<Rep>;
         constexpr size_t max_2 = std::numeric_limits<Num>::max() >> HALF_BIT_SIZE<Num>;
 
         let base_dist = make_exponential_distribution<Num, Num>(2, cast(Num) min(max_1, max_2));
-        assert(auto_test_to_base(250, 2, Optim_Info{}));
+        assert(auto_test_to_base(250, 2, Optims{}));
 
         for(size_t i = 0; i < random_runs; i++)
         {
-            Optim_Info optims = generate_random_optims(generator);
+            Optims optims = generate_random_optims(generator);
             umax num = num_dist(*generator);
             Num base = base_dist(*generator);
 
@@ -1813,16 +1472,14 @@ namespace tiny_num::test
     }
 
     template <typename T>
-    runtime_proc test_pow(Memory_Resource* memory, Random_Generator* generator, size_t random_runs, size_t controlled_runs)
+    runtime_proc test_pow(Random_Generator* generator, size_t random_runs, size_t controlled_runs)
     {
         using Res = Batch_Op_Result;
         using umax = umax;
-        using Vector = Vector<T>;
-        using Padded = Padded_Vector<T>;
+        using POD_Vector = POD_Vector<T>;
+        using Padded = Padded_POD_Vector<T>;
         using CSlice = Slice<const T>;
         using Slice = Slice<T>;
-
-        Memory_Resource* resource = memory;
 
         enum Pow_Algorhitm
         {
@@ -1831,51 +1488,53 @@ namespace tiny_num::test
             SQUARING
         };
 
-        runtime_proc pow_ = [&](CSlice num, size_t pow, Optim_Info optims, Pow_Algorhitm algorhitm) -> Vector {
-            size_t required_size = required_pow_out_size(num, pow);
-            size_t aux_size = required_pow_by_squaring_aux_size(num, pow)*100 + 100;
-            Vector out = make_sized_vector<T>(required_size, resource);
-            Vector aux = make_sized_vector<T>(aux_size, resource);
+        runtime_proc pow_ = [&](CSlice num, size_t pow, Optims optims, Pow_Algorhitm algorhitm) -> POD_Vector {
+            size_t log2num = log2(num);
 
-            Slice out_s = to_slice(&out);
-            Slice aux_s = to_slice(&aux);
+            size_t required_size = required_pow_out_size(log2num, pow, BIT_SIZE<T>);
+            size_t aux_size = required_pow_by_squaring_aux_size(log2num, pow, BIT_SIZE<T>)*100 + 100;
+            POD_Vector out = make_sized_vector<T>(required_size);
+            POD_Vector aux = make_sized_vector<T>(aux_size);
+
+            Slice out_s = slice(&out);
+            Slice aux_s = slice(&aux);
 
             Slice powed;
             if(algorhitm == TRIVIAL)
-                powed = ::trivial_pow<T>(&out_s, &aux_s, num, pow, optims);
+                powed = tiny_num::pow_trivial<T>(&out_s, &aux_s, num, pow, optims);
             else if(algorhitm == SQUARING)
-                powed = ::pow_by_squaring<T>(&out_s, &aux_s, num, pow, optims);
+                powed = tiny_num::pow_by_squaring<T>(&out_s, &aux_s, num, pow, optims);
             else
-                powed = ::pow<T>(&out_s, &aux_s, num, pow, optims);
+                powed = tiny_num::pow<T>(&out_s, &aux_s, num, pow, optims);
 
             resize(&out, powed.size);
             return out;
         };
 
-        runtime_proc pow = [&](umax num, size_t pow, Optim_Info optims, Pow_Algorhitm algorhitm) -> umax {
-            Vector num_ = make_vector_of_digits<T>(num, resource);
-            Vector powed = pow_(to_slice(num_), pow, optims, algorhitm);
-            CSlice powed_s = to_slice(powed);
+        runtime_proc pow = [&](umax num, size_t pow, Optims optims, Pow_Algorhitm algorhitm) -> umax {
+            POD_Vector num_ = make_vector_of_digits<T>(num);
+            POD_Vector powed = pow_(slice(num_), pow, optims, algorhitm);
+            CSlice powed_s = slice(powed);
 
-            umax res = unwrap(to_number(powed_s));
+            umax res = to_number(powed_s);
             return res;
         };
 
-        runtime_proc pow_by_squaring = [&](umax num, umax power, Optim_Info optims = Optim_Info{}) -> umax {
+        runtime_proc pow_by_squaring = [&](umax num, umax power, Optims optims = Optims{}) -> umax {
             return pow(num, power, optims, SQUARING);
         };
 
-        runtime_proc trivial_pow = [&](umax num, umax power, Optim_Info optims = Optim_Info{}) -> umax {
+        runtime_proc pow_trivial = [&](umax num, umax power, Optims optims = Optims{}) -> umax {
             return pow(num, power, optims, TRIVIAL);
         };
 
-        runtime_proc optimal_pow = [&](umax num, umax power, Optim_Info optims = Optim_Info{}) -> umax {
+        runtime_proc optimal_pow = [&](umax num, umax power, Optims optims = Optims{}) -> umax {
             return pow(num, power, optims, OPTIMAL);
         };
 
-        runtime_proc test_pow = [&](CSlice num, size_t pow, CSlice expected, Pow_Algorhitm algorhitm, Optim_Info optims) -> bool {
-            Vector powed = pow_(num, pow, optims, algorhitm);
-            CSlice powed_s = to_slice(powed);
+        runtime_proc test_pow = [&](CSlice num, size_t pow, CSlice expected, Pow_Algorhitm algorhitm, Optims optims) -> bool {
+            POD_Vector powed = pow_(num, pow, optims, algorhitm);
+            CSlice powed_s = slice(powed);
 
             assert(is_striped_number(powed_s));
             assert(is_striped_number(expected));
@@ -1883,17 +1542,17 @@ namespace tiny_num::test
             return is_equal<T>(powed_s, expected);
         };
 
-        assert(trivial_pow(0, 0) == 1);
-        assert(trivial_pow(0, 1) == 0);
-        assert(trivial_pow(0, 54) == 0);
-        assert(trivial_pow(0, 5554135) == 0);
-        assert(trivial_pow(2, 0) == 1);
-        assert(trivial_pow(1048576, 0) == 1);
-        assert(trivial_pow(5465313, 1) == 5465313);
-        assert(trivial_pow(5465313, 2) == 5465313ull*5465313ull);
-        assert(trivial_pow(5465, 3) == 5465ull*5465ull*5465ull);
-        assert(trivial_pow(2, 10) == 1024);
-        assert(trivial_pow(2, 20) == 1048576);
+        assert(pow_trivial(0, 0) == 1);
+        assert(pow_trivial(0, 1) == 0);
+        assert(pow_trivial(0, 54) == 0);
+        assert(pow_trivial(0, 5554135) == 0);
+        assert(pow_trivial(2, 0) == 1);
+        assert(pow_trivial(1048576, 0) == 1);
+        assert(pow_trivial(5465313, 1) == 5465313);
+        assert(pow_trivial(5465313, 2) == 5465313ull*5465313ull);
+        assert(pow_trivial(5465, 3) == 5465ull*5465ull*5465ull);
+        assert(pow_trivial(2, 10) == 1024);
+        assert(pow_trivial(2, 20) == 1048576);
 
         assert(pow_by_squaring(0, 0) == 1);
         assert(pow_by_squaring(0, 1) == 0);
@@ -1928,38 +1587,36 @@ namespace tiny_num::test
     
 
     template <typename T>
-    runtime_proc test_root(Memory_Resource* memory, Random_Generator* generator, size_t random_runs, size_t controlled_runs)
+    runtime_proc test_root(Random_Generator* generator, size_t random_runs, size_t controlled_runs)
     {
         using Res = Batch_Op_Result;
         using umax = umax;
-        using Vector = Vector<T>;
-        using Padded = Padded_Vector<T>;
+        using POD_Vector = POD_Vector<T>;
+        using Padded = Padded_POD_Vector<T>;
         using CSlice = Slice<const T>;
         using Slice = Slice<T>;
 
-        Memory_Resource* resource = memory;
+        runtime_proc root_ = [&](CSlice num, size_t root, Optims optims) -> POD_Vector {
+            size_t required_size = required_root_out_size(log2(num), root, BIT_SIZE<T>);
+            size_t aux_size = required_root_aux_size(log2(num), root, BIT_SIZE<T>);
+            POD_Vector out = make_sized_vector<T>(required_size);
+            POD_Vector aux = make_sized_vector<T>(aux_size);
 
-        runtime_proc root_ = [&](CSlice num, size_t root, Optim_Info optims) -> Vector {
-            size_t required_size = root_required_out_size(log2(num), root, BIT_SIZE<T>);
-            size_t aux_size = root_required_aux_size(log2(num), root, BIT_SIZE<T>);
-            Vector out = make_sized_vector<T>(required_size, resource);
-            Vector aux = make_sized_vector<T>(aux_size, resource);
+            Slice out_s = slice(&out);
+            Slice aux_s = slice(&aux);
 
-            Slice out_s = to_slice(&out);
-            Slice aux_s = to_slice(&aux);
-
-            Slice rooted = ::root<T>(&out_s, &aux_s, num, root, optims);
+            Slice rooted = tiny_num::root<T>(&out_s, &aux_s, num, root, optims);
 
             resize(&out, rooted.size);
             return out;
         };
 
-        runtime_proc root = [&](umax num, size_t root, Optim_Info optims = Optim_Info{}) -> umax {
-            Vector num_ = make_vector_of_digits<T>(num, resource);
-            Vector rooted = root_(to_slice(num_), root, optims);
-            CSlice rooted_s = to_slice(rooted);
+        runtime_proc root = [&](umax num, size_t root, Optims optims = Optims{}) -> umax {
+            POD_Vector num_ = make_vector_of_digits<T>(num);
+            POD_Vector rooted = root_(slice(num_), root, optims);
+            CSlice rooted_s = slice(rooted);
 
-            umax res = unwrap(to_number(rooted_s));
+            umax res = to_number(rooted_s);
             return res;
         };
 
@@ -1979,7 +1636,7 @@ namespace tiny_num::test
         }
     }
 
-    runtime_proc run_typed_tests(Memory_Resource* memory, Random_Generator* generator, size_t random_runs, size_t controlled_runs)
+    runtime_proc run_typed_tests(Random_Generator* generator, size_t random_runs, size_t controlled_runs)
     {
         std::cout << "TESTING UNTYPED "<< std::endl;
         test_misc(generator, random_runs);
@@ -1987,63 +1644,63 @@ namespace tiny_num::test
     }
 
     template <typename T>
-    runtime_proc run_untyped_tests(Memory_Resource* memory, Random_Generator* generator, size_t random_runs, size_t controlled_runs)
+    runtime_proc run_untyped_tests(Random_Generator* generator, size_t random_runs, size_t controlled_runs, cstring type_name)
     {
-        std::cout << "TESTING: " << meta::type_name<T>() << std::endl;
+        std::cout << "TESTING: " << type_name << std::endl;
 
         std::cout << "add...        ";
-        test_add_overflow<T>(memory, generator, random_runs);
+        test_add_overflow<T>(generator, random_runs);
         std::cout << "ok" << std::endl;
 
         std::cout << "sub...        ";
-        test_sub_overflow<T>(memory, generator, random_runs);
+        test_sub_overflow<T>(generator, random_runs);
         std::cout << "ok" << std::endl;
 
         std::cout << "complement... ";
-        test_complement_overflow<T>(memory, generator, random_runs);
+        test_complement_overflow<T>(generator, random_runs);
         std::cout << "ok" << std::endl;
 
         std::cout << "shift...      ";
-        test_shift_overflow<T>(memory, generator, random_runs);
+        test_shift_overflow<T>(generator, random_runs);
         std::cout << "ok" << std::endl;
 
         std::cout << "mul short...  ";
-        test_mul_overflow<T>(memory, generator, random_runs, controlled_runs);
+        test_mul_overflow<T>(generator, random_runs, controlled_runs);
         std::cout << "ok" << std::endl;
 
         std::cout << "div short...  ";
-        test_div_overflow_low<T>(memory, generator, random_runs, controlled_runs);
+        test_div_overflow<T>(generator, random_runs, controlled_runs);
         std::cout << "ok" << std::endl;
 
         std::cout << "mul long...   ";
-        test_mul_quadratic<T>(memory, generator, random_runs);
+        test_mul<T>(generator, random_runs);
         std::cout << "ok" << std::endl;
 
         std::cout << "mul long...   ";
-        test_div_bit_by_bit<T>(memory, generator, random_runs);
+        test_div<T>(generator, random_runs);
         std::cout << "ok" << std::endl;
 
         std::cout << "pow...        ";
-        test_pow<T>(memory, generator, random_runs, controlled_runs);
+        test_pow<T>(generator, random_runs, controlled_runs);
         std::cout << "ok" << std::endl;
 
         std::cout << "root...       ";
-        test_root<T>(memory, generator, random_runs, controlled_runs);
+        test_root<T>(generator, random_runs, controlled_runs);
         std::cout << "ok" << std::endl;
 
         std::cout << "conversion... ";
         const size_t quarter_runs = random_runs / 4;
         if constexpr(sizeof(T) >= sizeof(u8))
-            test_to_base<T, u8>(memory, generator, quarter_runs);
+            test_to_base<T, u8>(generator, quarter_runs);
 
         if constexpr(sizeof(T) >= sizeof(u16))
-            test_to_base<T, u16>(memory, generator, quarter_runs);
+            test_to_base<T, u16>(generator, quarter_runs);
 
         if constexpr(sizeof(T) >= sizeof(u32))
-            test_to_base<T, u32>(memory, generator, quarter_runs);
+            test_to_base<T, u32>(generator, quarter_runs);
 
         if constexpr(sizeof(T) >= sizeof(u64))
-            test_to_base<T, u64>(memory, generator, quarter_runs);
+            test_to_base<T, u64>(generator, quarter_runs);
 
         std::cout << "ok" << std::endl;
         std::cout << "=== OK ===\n" << std::endl;
@@ -2066,27 +1723,14 @@ namespace tiny_num::test
         const size_t random_runs = 10000;
         const size_t controlled_runs = 500;
 
-        auto ns = ellapsed_time([&](){
-            #ifdef USE_CUSTOM_LIB
-                jot::Allocator* def = jot::memory_globals::default_allocator();
-
-                auto memory_res = def->allocate(jot::memory_constants::MEBI_BYTE*8, 8);
-                defer(def->deallocate(memory_res.items, 8));
-
-                jot::Ring_Allocator ring(memory_res.items, def);
-                Memory_Resource* res = &ring;
-            #else
-                Memory_Resource* res = std::pmr::new_delete_resource();
-            #endif
-
-            run_typed_tests(res, &generator, random_runs, controlled_runs);
-            run_untyped_tests<u8>(res, &generator, random_runs, controlled_runs);
-            run_untyped_tests<u16>(res, &generator, random_runs, controlled_runs);
-            run_untyped_tests<u32>(res, &generator, random_runs, controlled_runs);
-            run_untyped_tests<u64>(res, &generator, random_runs, controlled_runs);
+        auto ns = benchmark::ellapsed_time([&](){
+            run_typed_tests(&generator, random_runs, controlled_runs);
+            run_untyped_tests<u8>(&generator, random_runs, controlled_runs, "u8");
+            run_untyped_tests<u16>(&generator, random_runs, controlled_runs, "u16");
+            run_untyped_tests<u32>(&generator, random_runs, controlled_runs, "u32");
+            run_untyped_tests<u64>(&generator, random_runs, controlled_runs, "u64");
         });
         std::cout << "tests ellapsed: " << ns << " ns" << std::endl;
-        
     }
 }
 

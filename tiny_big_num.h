@@ -37,7 +37,7 @@ namespace tiny_num
     #endif
 
     #ifndef MAX_RECURSION_DEPTH 
-        #define MAX_RECURSION_DEPTH 10
+        #define MAX_RECURSION_DEPTH 20
     #endif
 
     #ifndef MUL_QUADRATIC_SINGLE_BELOW_SIZE 
@@ -52,7 +52,7 @@ namespace tiny_num
         #define TRIVIAL_POW_BELOW_POWER 4
     #endif
 
-    struct Optim_Info
+    struct Optims
     {
         bool mul_shift = DO_OPTIM_MUL_SHIFT;
         bool mul_consts = DO_OPTIM_MUL_CONSTS;
@@ -61,10 +61,10 @@ namespace tiny_num
         bool div_consts = DO_OPTIM_DIV_CONSTS;
         bool rem_optims = DO_OPTIM_REM_OPTIMS;
 
-        size_t max_reusion_depth = MAX_RECURSION_DEPTH;
+        size_t max_recursion_depth = MAX_RECURSION_DEPTH;
         size_t mul_quadratic_both_below_size = MUL_QUADRATIC_BOTH_BELOW_SIZE;
         size_t mul_quadratic_single_below_size = MUL_QUADRATIC_SINGLE_BELOW_SIZE;
-        size_t trivial_pow_below_power = TRIVIAL_POW_BELOW_POWER;
+        size_t pow_trivial_below_power = TRIVIAL_POW_BELOW_POWER;
     };
 
     #define let const auto
@@ -132,7 +132,7 @@ namespace tiny_num
     template<typename T>
     func div_round_up(T value, No_Infer<T> to_multiple_of) -> T
     {
-        static_assert(std::is_integral_v<T>);
+        static_assert(std::is_integral_v<T>, "!");
         return (value + to_multiple_of - 1) / to_multiple_of;
     }
 
@@ -308,26 +308,26 @@ namespace tiny_num
     template <typename T>
     func high_mask(size_t index = HALF_BIT_SIZE<T>) -> T {
         assert(index < BIT_SIZE<T>);
-        static_assert(is_allowed_digit<T>);
+        static_assert(is_allowed_digit<T>, "!");
         return cast(T) (FULL_MASK<T> << index);
     }
 
     template <typename T>
     func low_mask(size_t index = HALF_BIT_SIZE<T>) -> T {
-        static_assert(is_allowed_digit<T>);
+        static_assert(is_allowed_digit<T>, "!");
         return cast(T) ~high_mask<T>(index);
     }
 
     template <typename T>
     func high_bits(T value, size_t index = HALF_BIT_SIZE<T>) -> T {
-        static_assert(is_allowed_digit<T>);
+        static_assert(is_allowed_digit<T>, "!");
         assert(index < BIT_SIZE<T>);
         return value >> index;
     }
 
     template <typename T>
     func low_bits(T value, size_t index = HALF_BIT_SIZE<T>) -> T {
-        static_assert(is_allowed_digit<T>);
+        static_assert(is_allowed_digit<T>, "!");
         let mask = low_mask<T>(index);
         return value & mask;
     };  
@@ -335,14 +335,14 @@ namespace tiny_num
     template <typename T>
     func combine_bits(T low, T high, size_t index = HALF_BIT_SIZE<T>) -> T {
         assert(index < BIT_SIZE<T>);
-        static_assert(is_allowed_digit<T>);
+        static_assert(is_allowed_digit<T>, "!");
         return low_bits(low, index) | (high << index);
     };
 
     template <typename T>
     func dirty_combine_bits(T low, T high, size_t index = HALF_BIT_SIZE<T>) -> T {
         assert(index < BIT_SIZE<T>);
-        static_assert(is_allowed_digit<T>);
+        static_assert(is_allowed_digit<T>, "!");
         assert(high_bits(low, index) == 0 && "low must not have high bits use combine_bits instead");
         return low | (high << index);
     };
@@ -350,7 +350,7 @@ namespace tiny_num
     template <typename T>
     func find_last_set_bit(T val) -> T  
     {
-        static_assert(is_allowed_digit<T>);
+        static_assert(is_allowed_digit<T>, "!");
         if constexpr(sizeof(T) > 8)
         {
             //@TODO: upgrade to iterative on u64s and test
@@ -382,7 +382,7 @@ namespace tiny_num
         if(val == 0)
             return 0;
 
-        static_assert(is_allowed_digit<T>);
+        static_assert(is_allowed_digit<T>, "!");
         if constexpr(sizeof(T) > 8)
         {
             T k = 0;
@@ -425,7 +425,7 @@ namespace tiny_num
     template <typename T>
     func pop_count(T val) -> size_t
     {
-        static_assert(is_allowed_digit<T>);
+        static_assert(is_allowed_digit<T>, "!");
         if constexpr(sizeof(T) < sizeof(uint32_t))
         {
             return pop_count<uint32_t>(cast(uint32_t) val);
@@ -457,19 +457,19 @@ namespace tiny_num
     }
 
     template <typename T>
-    struct Overflow
+    struct Single_Overflow
     {
-        T value;
-        T overflow;
+        T value = 0;
+        T overflow = 0;
 
-        bool constexpr operator ==(Overflow const&) const noexcept = default;
+        bool constexpr operator ==(Single_Overflow const&) const noexcept = default;
     };
 
     template <typename T>
     struct Batch_Overflow
     {
         Slice<T> slice;
-        T overflow;
+        T overflow = 0;
 
         bool constexpr operator ==(Batch_Overflow const&) const noexcept = default;
     };
@@ -489,7 +489,7 @@ namespace tiny_num
     template <typename T>
     func find_last_set_digit(Slice<T> num) -> size_t
     {
-        static_assert(is_allowed_digit<T>);
+        static_assert(is_allowed_digit<T>, "!");
 
         size_t i = num.size;
         for(; i-- > 0;)
@@ -502,7 +502,7 @@ namespace tiny_num
     template <typename T>
     func find_first_set_digit(Slice<T> num) -> size_t
     {
-        static_assert(is_allowed_digit<T>);
+        static_assert(is_allowed_digit<T>, "!");
         
         size_t i = 0;
         for(; i < num.size; i++)
@@ -527,16 +527,6 @@ namespace tiny_num
         return last(num) != 0;
     }
 
-    //@TODO: remove
-    template <typename T>
-    func is_striped_representation(Slice<T> num) -> bool
-    {
-        if(num.size == 0)
-            return true;
-
-        return num[0] != 0;
-    }
-
     template <typename Digit, typename Number>
     func digits_to_represent() -> size_t
     {
@@ -546,7 +536,7 @@ namespace tiny_num
     template <typename To = std::uint64_t, typename T = size_t>
     func to_number(Slice<T> bignum) -> To
     {
-        static_assert(is_allowed_digit<T>);
+        static_assert(is_allowed_digit<T>, "!");
         let stripped = striped_trailing_zeros(bignum);
 
         const size_t total_size = stripped.size * sizeof(T);
@@ -566,7 +556,7 @@ namespace tiny_num
     template <typename T, typename From = std::uint64_t>
     proc from_number(Slice<T>* bignum, From from) -> Slice<T>
     {
-        static_assert(is_allowed_digit<T>);
+        static_assert(is_allowed_digit<T>, "!");
         constexpr size_t count = digits_to_represent<T, From>();
         assert(bignum->size >= count);
 
@@ -599,10 +589,10 @@ namespace tiny_num
     namespace detail
     {
         template <typename T, typename... Ts>
-        func single_add_overflow_any(T carry, Ts... args) -> Overflow<T>
+        func single_add_overflow_any(T carry, Ts... args) -> Single_Overflow<T>
         {
-            static_assert(is_allowed_digit<T>);
-            static_assert((std::is_same_v<T, Ts> && ...));
+            static_assert(is_allowed_digit<T>, "!");
+            static_assert((std::is_same_v<T, Ts> && ...), "!");
             //will only overflow if we have more than 2^HALF_BIT_SIZE<T> + 1 operands => assert
             // (given that the smallest unsigned type is u8 we can safely sum up to 16 operands)
             // 
@@ -625,14 +615,14 @@ namespace tiny_num
             const T res_high = (high_bits(cast(T) args) + ...) + middle_carry;
             const T new_carry = high_bits(res_high);
 
-            return Overflow<T>{combine_bits(res_low, res_high), new_carry};
+            return Single_Overflow<T>{combine_bits(res_low, res_high), new_carry};
         }
 
         template <typename T, typename... Ts>
-        func single_sub_overflow_any(T carry, T left, Ts... args) -> Overflow<T>
+        func single_sub_overflow_any(T carry, T left, Ts... args) -> Single_Overflow<T>
         {
-            static_assert(is_allowed_digit<T>);
-            static_assert((std::is_same_v<T, Ts> && ...));
+            static_assert(is_allowed_digit<T>, "!");
+            static_assert((std::is_same_v<T, Ts> && ...), "!");
 
             constexpr size_t arg_count = sizeof...(args) + 1;
             constexpr size_t max_args = cast(size_t) (cast(T) 1 << HALF_BIT_SIZE<T>);
@@ -644,20 +634,20 @@ namespace tiny_num
             const T res_high = high_mask<T>() + high_bits(left) - (high_bits(args) + ...) - middle_carry;
             const T new_carry = low_mask<T>() - high_bits<T>(res_high);
 
-            return Overflow<T>{combine_bits(res_low, res_high), new_carry};
+            return Single_Overflow<T>{combine_bits(res_low, res_high), new_carry};
         }
 
     }
 
     template <typename T, typename... Ts>
-    func single_add_no_overflow(Ts... args) -> T
+    func single_add_no_overflow(T first, Ts... args) -> T
     {
-        static_assert((std::is_same_v<T, Ts> && ...));
+        static_assert((std::is_same_v<T, Ts> && ...), "!");
         #ifdef NDEBUG
-            return (args + ...);
+            return first + (args + ...);
         #else
-            const size_t size = sizeof...(args);
-            const T arr[] = {args...};
+            const size_t size = 1 + sizeof...(args);
+            const T arr[] = {first, args...};
             T sum = 0;
 
             for(size_t i = 0; i < size; i++)
@@ -672,33 +662,33 @@ namespace tiny_num
     }
 
     template <typename T>
-    func single_add_overflow(T left, T right, T carry = 0) -> Overflow<T> {
+    func single_add_overflow(T left, T right, T carry = 0) -> Single_Overflow<T> {
         return detail::single_add_overflow_any<T>(carry, left, right);
     }
 
     template <typename T>
-    func single_sub_overflow(T left, T right, T carry = 0) -> Overflow<T> {
+    func single_sub_overflow(T left, T right, T carry = 0) -> Single_Overflow<T> {
         return detail::single_sub_overflow_any<T>(carry, left, right);
     }
 
     template <typename T, typename... Ts>
-    func single_add_overflow_any(T left, T right, Ts... rest) -> Overflow<T> {
+    func single_add_overflow_any(T left, T right, Ts... rest) -> Single_Overflow<T> {
         return detail::single_add_overflow_any<T>(0, left, right, rest...);
     }
 
     template <typename T, typename... Ts>
-    func single_sub_overflow_any(T left, T right, Ts... rest) -> Overflow<T> {
+    func single_sub_overflow_any(T left, T right, Ts... rest) -> Single_Overflow<T> {
         return detail::single_sub_overflow_any<T>(0, left, right, rest...);
     }
 
-    enum class Op_Location
+    enum class Location
     {
         IN_PLACE,
         OUT_OF_PLACE
     };
 
     template <typename T>
-    func batch_add_or_sub_overflow_short(Slice<T>* to, Slice<const T> left, T carry, bool is_addition, Op_Location location = Op_Location::OUT_OF_PLACE, size_t from = 0) -> Batch_Overflow<T>
+    func batch_add_or_sub_overflow_short(Slice<T>* to, Slice<const T> left, T carry, bool is_addition, Location location = Location::OUT_OF_PLACE, size_t from = 0) -> Batch_Overflow<T>
     {
         assert(to->size >= left.size);
         assert(check_are_one_way_aliasing<T>(left, *to) == false);
@@ -724,7 +714,7 @@ namespace tiny_num
             trimmed_to[j] = patch_res;
         }
 
-        if(location == Op_Location::OUT_OF_PLACE)
+        if(location == Location::OUT_OF_PLACE)
             copy_n<T>(to->data + j, left.data + j, left.size - j, Iter_Direction::FORWARD);
 
         return Batch_Overflow<T>{trimmed_to, carry};
@@ -732,22 +722,22 @@ namespace tiny_num
 
     //add short overflow
     template <typename T>
-    func batch_add_overflow_short(Slice<T>* to, Slice<const T> left, T right, Op_Location location = Op_Location::OUT_OF_PLACE, size_t from = 0) -> Batch_Overflow<T>
+    func batch_add_overflow_short(Slice<T>* to, Slice<const T> left, T right, Location location = Location::OUT_OF_PLACE, size_t from = 0) -> Batch_Overflow<T>
     {
-        return consume_carry(to, left, right, true, location, from);
+        return batch_add_or_sub_overflow_short(to, left, right, true, location, from);
     }
 
     template <typename T>
-    func batch_sub_overflow_short(Slice<T>* to, Slice<const T> left, T right, Op_Location location = Op_Location::OUT_OF_PLACE, size_t from = 0) -> Batch_Overflow<T>
+    func batch_sub_overflow_short(Slice<T>* to, Slice<const T> left, T right, Location location = Location::OUT_OF_PLACE, size_t from = 0) -> Batch_Overflow<T>
     {
-        return consume_carry(to, left, right, false, location, from);
+        return batch_add_or_sub_overflow_short(to, left, right, false, location, from);
     }
 
     //add long overflow
     template <typename T>
-    func batch_add_overflow_long(Slice<T>* to, Slice<const T> left, Slice<const T> right, Op_Location location = Op_Location::OUT_OF_PLACE, T carry_in = 0) -> Batch_Overflow<T>
+    func batch_add_overflow_long(Slice<T>* to, Slice<const T> left, Slice<const T> right, Location location = Location::OUT_OF_PLACE, T carry_in = 0) -> Batch_Overflow<T>
     {
-        static_assert(is_allowed_digit<T>);
+        static_assert(is_allowed_digit<T>, "!");
         assert(to->size >= right.size);
         assert(to->size >= left.size);
         assert(check_are_one_way_aliasing<T>(left, *to) == false);
@@ -769,9 +759,9 @@ namespace tiny_num
     }
 
     template <typename T>
-    func batch_sub_overflow_long(Slice<T>* to, Slice<const T> left, Slice<const T> right, Op_Location location = Op_Location::OUT_OF_PLACE, T carry_in = 0) -> Batch_Overflow<T>
+    func batch_sub_overflow_long(Slice<T>* to, Slice<const T> left, Slice<const T> right, Location location = Location::OUT_OF_PLACE, T carry_in = 0) -> Batch_Overflow<T>
     {
-        static_assert(is_allowed_digit<T>);
+        static_assert(is_allowed_digit<T>, "!");
         assert(to->size >= right.size);
         assert(to->size >= left.size);
         assert(check_are_one_way_aliasing<T>(left, *to) == false);
@@ -779,7 +769,7 @@ namespace tiny_num
         //assert(high_bits(carry_in) == 0);
 
         T carry = carry_in;
-        proc update = [&](size_t i, Overflow<T> oveflow) {
+        proc update = [&](size_t i, Single_Overflow<T> oveflow) {
             (*to)[i] = oveflow.value;
             carry = oveflow.overflow;
         };
@@ -799,7 +789,7 @@ namespace tiny_num
     }
 
     template <typename T>
-    func single_complement_overflow(T val, T carry) -> Overflow<T>
+    func single_complement_overflow(T val, T carry) -> Single_Overflow<T>
     {
         const T val_inv = ~val;
 
@@ -809,13 +799,13 @@ namespace tiny_num
         const T complement_high = high_bits(val_inv) + middle_carry;
         const T new_carry = high_bits(complement_high);
 
-        return Overflow<T>{combine_bits(complement_low, complement_high), new_carry};
+        return Single_Overflow<T>{combine_bits(complement_low, complement_high), new_carry};
     }
 
     template <typename T>
     proc batch_complement_overflow(Slice<T>* to, Slice<const T> left, T carry_in = 1) -> Batch_Overflow<T>
     {
-        static_assert(is_allowed_digit<T>);
+        static_assert(is_allowed_digit<T>, "!");
         assert(to->size >= left.size);
         assert(is_striped_number(left));
         assert(check_are_one_way_aliasing<T>(left, *to) == false);
@@ -833,7 +823,7 @@ namespace tiny_num
     }
 
     template <typename T>
-    func single_shift_up_overflow(T low_item, size_t by_bits, T high_item) -> Overflow<T>
+    func single_shift_up_overflow(T low_item, size_t by_bits, T high_item) -> Single_Overflow<T>
     {
         assert(by_bits < BIT_SIZE<T> && by_bits != 0 && "shift must be in valid range (cannot be zero because its unimplmentable without if)");
         const size_t remaining_bits = BIT_SIZE<T> - by_bits;
@@ -860,11 +850,11 @@ namespace tiny_num
 
         const T out = high_bits(high_item, remaining_bits);
         const T shifted_out = out;
-        return Overflow<T>{composed, shifted_out};
+        return Single_Overflow<T>{composed, shifted_out};
     }
 
     template <typename T>
-    func single_shift_down_overflow(T low_item, size_t by_bits, T high_item) -> Overflow<T>
+    func single_shift_down_overflow(T low_item, size_t by_bits, T high_item) -> Single_Overflow<T>
     {
         assert(by_bits < BIT_SIZE<T> && by_bits != 0);
         const size_t remaining_bits = BIT_SIZE<T> - by_bits;
@@ -893,7 +883,7 @@ namespace tiny_num
 
         const T out = low_bits(low_item, by_bits);
         const T shifted_out = out << remaining_bits;
-        return Overflow<T>{composed, shifted_out};
+        return Single_Overflow<T>{composed, shifted_out};
     }
 
     //We allow shifting while iterating in both directions:
@@ -911,7 +901,7 @@ namespace tiny_num
     proc batch_shift_up_overflow(Slice<T>* out, Slice<const T> in, size_t by_bits, 
         Iter_Direction direction = Iter_Direction::FORWARD, T carry_in = 0) -> Batch_Overflow<T>
     {
-        static_assert(is_allowed_digit<T>);
+        static_assert(is_allowed_digit<T>, "!");
         assert(out->size >= in.size);
         assert(by_bits < BIT_SIZE<T>);
 
@@ -968,7 +958,7 @@ namespace tiny_num
     proc batch_shift_down_overflow(Slice<T>* out, Slice<const T> in, size_t by_bits, 
         Iter_Direction direction = Iter_Direction::FORWARD, T carry_in = 0) -> Batch_Overflow<T>
     {
-        static_assert(is_allowed_digit<T>);
+        static_assert(is_allowed_digit<T>, "!");
         assert(out->size >= in.size);
         assert(by_bits < BIT_SIZE<T>);
 
@@ -1068,7 +1058,7 @@ namespace tiny_num
     };
 
     template <typename T>
-    func single_mul_overflow(T left, T right, T last_value, Mul_Overflow_Optims const& mul_optims = Mul_Overflow_Optims::NONE) -> Overflow<T>
+    func single_mul_overflow(T left, T right, T last_value, Mul_Overflow_Optims const& mul_optims = Mul_Overflow_Optims::NONE) -> Single_Overflow<T>
     {
         //we do the oveflow multiplication by multiplying each digit normally and summing the overflow 
         // => 25  
@@ -1156,7 +1146,7 @@ namespace tiny_num
         let curr_value = single_add_overflow_any<T>(s_cur, low_mixed, last_value); //also add last_value to save ops
         T next_value =   single_add_no_overflow<T>(s_next_ns, high_mixed, curr_value.overflow); //also add the overflow
 
-        return Overflow<T>{curr_value.value, next_value};
+        return Single_Overflow<T>{curr_value.value, next_value};
     }
 
     template <typename T>
@@ -1166,9 +1156,9 @@ namespace tiny_num
     }
 
     template <typename T>
-    proc batch_mul_overflow(Slice<T>* to, Slice<const T> left, T right, Optim_Info const& optims, T carry_in = 0) -> Batch_Overflow<T>
+    proc batch_mul_overflow(Slice<T>* to, Slice<const T> left, T right, Optims const& optims, T carry_in = 0) -> Batch_Overflow<T>
     {
-        static_assert(is_allowed_digit<T>);
+        static_assert(is_allowed_digit<T>, "!");
         assert(to->size >= left.size);
         assert(check_are_one_way_aliasing<T>(left, *to) == false);
 
@@ -1208,7 +1198,7 @@ namespace tiny_num
         {                                           \
             for (size_t i = 0; i < left.size; i++)  \
             {                                       \
-                const Overflow<T> res = operation;  \
+                const Single_Overflow<T> res = operation;  \
                 (*to)[i] = res.value;               \
                 carry = res.overflow;               \
             }                                       \
@@ -1226,7 +1216,7 @@ namespace tiny_num
     }
 
     template <typename T>
-    func single_div_overflow(T left, T right, T carry_in = 0) -> Overflow<T>
+    func single_div_overflow(T left, T right, T carry_in = 0) -> Single_Overflow<T>
     {
         //The algorhitm works as follows (only in different base - we use base 10 for demosntartion)
         // 61 / 5 == 10 + 11 / 5 == 10 + 2 == 12
@@ -1251,13 +1241,13 @@ namespace tiny_num
         const T out_carry = operand_low % right;
 
         const T res = dirty_combine_bits(res_low, res_high);
-        return Overflow<T>{res, out_carry};
+        return Single_Overflow<T>{res, out_carry};
     }
 
     template <typename T>
-    proc batch_div_overflow(Slice<T>* to, Slice<const T> left, T right, Optim_Info const& optims, T carry_in = 0) -> Batch_Overflow<T>
+    proc batch_div_overflow(Slice<T>* to, Slice<const T> left, T right, Optims const& optims, T carry_in = 0) -> Batch_Overflow<T>
     {
-        static_assert(is_allowed_digit<T>);
+        static_assert(is_allowed_digit<T>, "!");
         assert(to->size >= left.size);
         assert(high_bits(right) == 0 && "only works for divisors under half bit size");
         assert(right != 0 && "cannot divide by zero");
@@ -1297,9 +1287,9 @@ namespace tiny_num
     }
 
     template <typename T>
-    proc batch_rem_overflow(Slice<const T> left, T right, Optim_Info const& optims, T carry_in = 0) -> T
+    proc batch_rem_overflow(Slice<const T> left, T right, Optims const& optims, T carry_in = 0) -> T
     {
-        static_assert(is_allowed_digit<T>);
+        static_assert(is_allowed_digit<T>, "!");
         assert(high_bits(right) == 0 && "only works for divisors under half bit size");
         assert(right != 0 && "cannot divide by zero");
 
@@ -1332,9 +1322,9 @@ namespace tiny_num
     }
 
     template <typename T>
-    proc add(Slice<T>* to, Slice<const T> left, Slice<const T> right, Op_Location location = Op_Location::OUT_OF_PLACE)
+    proc add(Slice<T>* to, Slice<const T> left, Slice<const T> right, Location location = Location::OUT_OF_PLACE)
     {
-        static_assert(is_allowed_digit<T>);
+        static_assert(is_allowed_digit<T>, "!");
         assert(is_striped_number(left));
         assert(is_striped_number(right));
         assert(to->size >= required_add_out_size(left.size, right.size));
@@ -1342,7 +1332,7 @@ namespace tiny_num
         let res = batch_add_overflow_long<T>(to, left, right, location);
         if(res.overflow == 0)
         {
-            if(location == Op_Location::IN_PLACE)
+            if(location == Location::IN_PLACE)
                 return striped_trailing_zeros(res.slice);
             
             assert(is_striped_number(res.slice));
@@ -1364,9 +1354,9 @@ namespace tiny_num
     }
 
     template <typename T>
-    proc sub(Slice<T>* to, Slice<const T> left, Slice<const T> right, Op_Location location = Op_Location::OUT_OF_PLACE)
+    proc sub(Slice<T>* to, Slice<const T> left, Slice<const T> right, Location location = Location::OUT_OF_PLACE)
     {
-        static_assert(is_allowed_digit<T>);
+        static_assert(is_allowed_digit<T>, "!");
         assert(is_striped_number(left));
         assert(is_striped_number(right));
         assert(to->size >= required_sub_out_size(left.size, right.size));
@@ -1383,9 +1373,9 @@ namespace tiny_num
     }
 
     template <typename T>
-    proc mul(Slice<T>* to, Slice<const T> left, T right, Optim_Info const& optims)
+    proc mul(Slice<T>* to, Slice<const T> left, T right, Optims const& optims)
     {
-        static_assert(is_allowed_digit<T>);
+        static_assert(is_allowed_digit<T>, "!");
         assert(is_striped_number(left));
         assert(to->size >= required_sub_out_size(left.size, 1));
 
@@ -1405,7 +1395,7 @@ namespace tiny_num
     }
 
     template <typename T>
-    struct Div_Res
+    struct Div_Result
     {
         Slice<T> quotient;
         Slice<T> remainder;
@@ -1425,9 +1415,9 @@ namespace tiny_num
     }
 
     template <typename T, bool DO_QUOTIENT = true>
-    proc div_bit_by_bit(Slice<T>* quotient, Slice<T>* remainder, Slice<const T> num, Slice<const T> den, Optim_Info const& optims) -> Div_Res<T>
+    proc div_bit_by_bit(Slice<T>* quotient, Slice<T>* remainder, Slice<const T> num, Slice<const T> den, Optims const& optims) -> Div_Result<T>
     {
-        static_assert(is_allowed_digit<T>);
+        static_assert(is_allowed_digit<T>, "!");
         assert(is_striped_number(num));
         assert(is_striped_number(den));
         assert(check_are_aliasing<T>(*quotient, num) == false);
@@ -1447,7 +1437,7 @@ namespace tiny_num
         {
             let stripped_quotient = trim(*quotient, 0);
             let stripped_remainder = trim(*remainder, 0);
-            return Div_Res<T>{stripped_quotient, stripped_remainder};
+            return Div_Result<T>{stripped_quotient, stripped_remainder};
         }
 
         if(num.size < den.size)
@@ -1457,10 +1447,9 @@ namespace tiny_num
             mut stripped_quotient = trim(*quotient, 0);
 
             copy_slice<T>(&stripped_remainder, num, Iter_Direction::NO_ALIAS);
-            return Div_Res<T>{stripped_quotient, stripped_remainder};
+            return Div_Result<T>{stripped_quotient, stripped_remainder};
         }
 
-        //@TODO: move up
         Slice<T> trimmed_remainder = trim(*remainder, required_rem_size);
         Slice<T> trimmed_quotient = trim(*quotient, required_quot_size);    
 
@@ -1494,7 +1483,7 @@ namespace tiny_num
             }
 
             let stripped_remainder = trim(trimmed_remainder, remainder_size);
-            return Div_Res<T>{stripped_quotient, stripped_remainder};
+            return Div_Result<T>{stripped_quotient, stripped_remainder};
         }
 
         Slice<T> curr_remainder = trim(trimmed_remainder, 0);
@@ -1513,7 +1502,7 @@ namespace tiny_num
             set_nth_bit(&trimmed_remainder, 0, num_ith_bit);
             if(compare<T>(curr_remainder, den) >= 0)
             {
-                let sub_res = batch_sub_overflow_long<T>(&curr_remainder, curr_remainder, den, Op_Location::IN_PLACE);
+                let sub_res = batch_sub_overflow_long<T>(&curr_remainder, curr_remainder, den, Location::IN_PLACE);
                 curr_remainder = striped_trailing_zeros<T>(curr_remainder);
                 assert(sub_res.overflow == 0 && "should not overflow");
                     
@@ -1527,23 +1516,21 @@ namespace tiny_num
             ? striped_trailing_zeros<T>(trimmed_quotient)
             : trim(trimmed_quotient, 0);
 
-        return Div_Res<T>{stripped_quotient, curr_remainder};
+        return Div_Result<T>{stripped_quotient, curr_remainder};
     }
 
     template <typename T>
-    proc div(Slice<T>* quotient, Slice<T>* remainder, Slice<const T> num, Slice<const T> den, Optim_Info const& optims) -> Div_Res<T>
+    proc div(Slice<T>* quotient, Slice<T>* remainder, Slice<const T> num, Slice<const T> den, Optims const& optims) -> Div_Result<T>
     {
         return div_bit_by_bit(quotient, remainder, num, den, optims);
     }
 
     template <typename T>
-    proc rem_bit_by_bit(Slice<T>* remainder, Slice<const T> num, Slice<const T> den, Optim_Info const& optims) -> Slice<T>
+    proc rem(Slice<T>* remainder, Slice<const T> num, Slice<const T> den, Optims const& optims) -> Slice<T>
     {
-        static_assert(is_allowed_digit<T>);
+        static_assert(is_allowed_digit<T>, "!");
         Slice<T> quotient = {nullptr, 0};
         let div_res = div_bit_by_bit<T, false>(&quotient, remainder, num, den, optims);
-        if(div_res.has == false)
-            return {};
 
         assert(div_res.quotient.size == 0 && "in case of only remainder the quotient size should be 0");
         assert(div_res.quotient.data == nullptr && "and data nullptr as we set it");
@@ -1552,7 +1539,7 @@ namespace tiny_num
 
     template <typename T>
     proc batch_fused_mul_add_overflow(Slice<T>* to, Slice<const T> added, Slice<const T> multiplied, T coeficient, 
-        Optim_Info const& optims, const Op_Location location = Op_Location::OUT_OF_PLACE, T add_carry = 0, T mul_carry = 0) -> Batch_Overflow<T>
+        Optims const& optims, const Location location = Location::OUT_OF_PLACE, T add_carry = 0, T mul_carry = 0) -> Batch_Overflow<T>
     {   
         assert(added.size >= multiplied.size);
         assert(to->size >= added.size);
@@ -1564,7 +1551,7 @@ namespace tiny_num
             const Slice<T> trimmed_to = trim(*to, added.size);
             if(coeficient == 0) 
             {
-                if (location == Op_Location::IN_PLACE)
+                if (location == Location::IN_PLACE)
                     return Batch_Overflow<T>{trim(*to, 0), 0};
                 else
                 {
@@ -1623,12 +1610,11 @@ namespace tiny_num
     }
 
     template <typename T>
-    proc mul(Slice<T>* to, Slice<T>* aux, Slice<const T> left, Slice<const T> right, Optim_Info const& optims, size_t depth = 0);
-
+    proc mul(Slice<T>* to, Slice<T>* aux, Slice<const T> left, Slice<const T> right, Optims const& optims, size_t depth = 0);
 
     func required_mul_quadratic_out_size(size_t left_size, size_t right_size) -> size_t
     {
-         //@TODO
+        return required_mul_out_size(left_size, right_size);
     }
 
     func required_mul_quadratic_aux_size(size_t left_size, size_t right_size) -> size_t
@@ -1637,9 +1623,9 @@ namespace tiny_num
     }
 
     template <typename T>
-    proc mul_quadratic(Slice<T>* to, Slice<T>* temp, Slice<const T> left, Slice<const T> right, Optim_Info const& optims) -> Slice<T>
+    proc mul_quadratic(Slice<T>* to, Slice<T>* temp, Slice<const T> left, Slice<const T> right, Optims const& optims) -> Slice<T>
     {
-        static_assert(is_allowed_digit<T>);
+        static_assert(is_allowed_digit<T>, "!");
         assert(check_are_aliasing<T>(*to, left) == false);
         assert(check_are_aliasing<T>(*to, right) == false);
         assert(check_are_aliasing<T>(*temp, left) == false);
@@ -1671,7 +1657,7 @@ namespace tiny_num
             mut shifted_to = slice(trimmed_to, i);
             assert(shifted_to.size >= mul_slice.size);
 
-            let add_res = batch_add_overflow_short<T>(&shifted_to, shifted_to, mul_slice, Op_Location::IN_PLACE);
+            let add_res = batch_add_overflow_long<T>(&shifted_to, shifted_to, mul_slice, Location::IN_PLACE);
             assert(add_res.overflow == 0 && "no final carry should be left");
         }
 
@@ -1681,14 +1667,14 @@ namespace tiny_num
 
     func required_mul_quadratic_fused_out_size(size_t left_size, size_t right_size) -> size_t
     {
-         //@TODO
+        return required_mul_out_size(left_size, right_size);
     }
 
     //@TODO: make it so that to is only operated on to the required sized
     template <typename T>
-    proc mul_quadratic_fused(Slice<T>* to, Slice<const T> left, Slice<const T> right, Optim_Info const& optims) -> Slice<T>
+    proc mul_quadratic_fused(Slice<T>* to, Slice<const T> left, Slice<const T> right, Optims const& optims) -> Slice<T>
     {
-        static_assert(is_allowed_digit<T>);
+        static_assert(is_allowed_digit<T>, "!");
         assert(check_are_aliasing<T>(*to, left) == false);
         assert(check_are_aliasing<T>(*to, right) == false);
 
@@ -1705,7 +1691,7 @@ namespace tiny_num
         {
             mut shifted_to = slice(trimmed_to, i);
 
-            let mul_add_res = batch_fused_mul_add_overflow<T>(&shifted_to, shifted_to, left, right[i], optims, Op_Location::IN_PLACE);
+            let mul_add_res = batch_fused_mul_add_overflow<T>(&shifted_to, shifted_to, left, right[i], optims, Location::IN_PLACE);
 
             assert(mul_add_res.overflow == 0 && "no carry should happen in this case");
         }
@@ -1715,10 +1701,10 @@ namespace tiny_num
 
     func required_mul_karatsuba_out_size(size_t left_size, size_t right_size) -> size_t
     {
-         //@TODO
+        return required_mul_out_size(left_size, right_size);
     }
 
-    func required_mul_karatsuba_aux_size(size_t left_size, size_t right_size) -> size_t
+    func required_mul_karatsuba_aux_size(size_t left_size, size_t right_size, size_t recursion_depth) -> size_t
     {
         if(left_size < right_size)
             std::swap(left_size, right_size);
@@ -1735,7 +1721,11 @@ namespace tiny_num
         size_t required_add_x_sum_size = required_add_out_size(x1, x2);
         size_t required_add_y_sum_size = required_add_out_size(y1, y2);
 
-        size_t required_z2_size = required_mul_out_size(required_add_x_sum_size, required_add_y_sum_size);
+        size_t required_z2_size = -1;
+        if(recursion_depth == 0)
+            required_z2_size = required_mul_out_size(required_add_x_sum_size, required_add_y_sum_size);
+        else
+            required_z2_size = required_mul_karatsuba_aux_size(required_add_x_sum_size, required_add_y_sum_size, recursion_depth - 1);
 
         return required_z2_size 
             + required_add_x_sum_size 
@@ -1744,9 +1734,9 @@ namespace tiny_num
 
 
     template <typename T>
-    proc mul_karatsuba(Slice<T>* to, Slice<T>* aux, Slice<const T> left, Slice<const T> right, Optim_Info const& optims, size_t depth = 0, bool is_run_alone = true) -> Slice<T>
+    proc mul_karatsuba(Slice<T>* to, Slice<T>* aux, Slice<const T> left, Slice<const T> right, Optims const& optims, size_t depth = 0, bool is_run_alone = true) -> Slice<T>
     {
-        static_assert(is_allowed_digit<T>);
+        static_assert(is_allowed_digit<T>, "!");
 
         assert(is_striped_number(left));
         assert(is_striped_number(right));
@@ -1806,7 +1796,7 @@ namespace tiny_num
         size_t required_z3_size = required_mul_out_size(x2.size, y2.size);
 
         size_t total_used_aux_size = required_add_x_sum_size + required_add_y_sum_size + required_z2_size;
-        size_t returned_required_aux = required_mul_karatsuba_aux_size(left.size, right.size);
+        size_t returned_required_aux = required_mul_karatsuba_aux_size(left.size, right.size, 0);
         assert(total_used_aux_size <= returned_required_aux);
 
         Slice<T> remaining_aux = slice(*aux, total_used_aux_size);
@@ -1847,13 +1837,13 @@ namespace tiny_num
         Slice<T> y_sum = add<T>(&y_sum_slot, y1, y2);
 
         Slice<T> x_sum_y_sum = mul<T>(&z2_slot, &remaining_aux, x_sum, y_sum, optims, depth + 1);
-        Slice<T> x_sum_y_sum_m_z1 = sub<T>(&x_sum_y_sum, x_sum_y_sum, z1, Op_Location::IN_PLACE);
-        Slice<T> z2 = sub<T>(&x_sum_y_sum_m_z1, x_sum_y_sum_m_z1, z3, Op_Location::IN_PLACE);
+        Slice<T> x_sum_y_sum_m_z1 = sub<T>(&x_sum_y_sum, x_sum_y_sum, z1, Location::IN_PLACE);
+        Slice<T> z2 = sub<T>(&x_sum_y_sum_m_z1, x_sum_y_sum_m_z1, z3, Location::IN_PLACE);
 
         //instead of multiplying z2 by base we add it to the appropriate position
         Slice<T> out_z2_up = slice(trimmed_out, base);
 
-        let add_res = batch_add_overflow_long<T>(&out_z2_up, out_z2_up, z2, Op_Location::IN_PLACE);
+        let add_res = batch_add_overflow_long<T>(&out_z2_up, out_z2_up, z2, Location::IN_PLACE);
         assert(add_res.overflow == 0 && "should not overflow");
 
         Slice<T> out = striped_trailing_zeros(trimmed_out);
@@ -1862,9 +1852,9 @@ namespace tiny_num
     }
 
     template <typename T>
-    proc mul(Slice<T>* to, Slice<T>* aux, Slice<const T> left, Slice<const T> right, Optim_Info const& optims, size_t depth)
+    proc mul(Slice<T>* to, Slice<T>* aux, Slice<const T> left, Slice<const T> right, Optims const& optims, size_t depth)
     {
-        static_assert(is_allowed_digit<T>);
+        static_assert(is_allowed_digit<T>, "!");
         assert(is_striped_number(left));
         assert(is_striped_number(right));
         assert(are_aliasing<T>(*to, left) == false);
@@ -1887,12 +1877,11 @@ namespace tiny_num
             min_size = right.size;
         }
 
-
         if(min_size >= optims.mul_quadratic_single_below_size 
             && max_size >= optims.mul_quadratic_both_below_size 
-            && depth < optims.max_reusion_depth)
+            && depth < optims.max_recursion_depth)
         {
-            size_t required_aux = required_mul_karatsuba_aux_size(max_size, min_size);
+            size_t required_aux = required_mul_karatsuba_aux_size(max_size, min_size, 1);
             if(aux->size >= required_aux)
             {
                 bool is_run_alone = optims.mul_quadratic_single_below_size <= 1;
@@ -1908,7 +1897,7 @@ namespace tiny_num
     }
 
     template <typename T>
-    func log2(Slice<const T> left) -> size_t
+    func log2(Slice<T> left) -> size_t
     {
         assert(is_striped_number(left));
         if(left.size == 0)
@@ -1953,36 +1942,34 @@ namespace tiny_num
         return square * 2 + out_swap;
     }
 
-
-    template <typename T>
-    func required_pow_out_size(Slice<const T> num, size_t power) -> size_t
-    {
-        return required_pow_out_size(log2(num), power, BIT_SIZE<T>);
-    }
-    template <typename T>
-    func required_pow_by_squaring_single_aux_swap_size(Slice<const T> num, size_t power) -> size_t
-    {
-        return required_pow_by_squaring_single_aux_swap_size(log2(num), power, BIT_SIZE<T>);
-    }
-    template <typename T>
-    func required_pow_by_squaring_aux_size(Slice<const T> num, size_t power) -> size_t
-    {
-        return required_pow_by_squaring_aux_size(log2(num), power, BIT_SIZE<T>);
+    func optimal_pow_aux_size(size_t num_bit_size, size_t power, size_t single_digit_bit_size) {
+        return required_pow_by_squaring_aux_size(num_bit_size, power, single_digit_bit_size);
     }
 
-    u64 single_pow_by_squaring(u64 x, u64 n)
+    template <typename T>
+    func single_pow_trivial(T x, T n) -> T
+    {
+        T res = 1;
+        for(T i = 0; i < n; i++)
+            res *= x;
+
+        return res;
+    }
+
+    template <typename T>
+    func single_pow_by_squaring(T x, T n) -> T
     {
         if (x <= 1) 
             return x;
         if(n == 0)  
             return 1;
 
-        u64 i = 0;
-        u64 y = 1;
+        T i = 0;
+        T y = 1;
         size_t max_pos = find_last_set_bit(n);
         for(; i <= max_pos; i++)
         {
-            i64 bit = get_bit<u64>(n, i);
+            T bit = get_bit<T>(n, i);
             if(bit)
                 y *= x;
             x *= x;
@@ -1991,7 +1978,7 @@ namespace tiny_num
     }
 
     template <typename T>
-    proc pow_by_squaring(Slice<T>* to, Slice<T>* aux, Slice<const T> num, size_t power, Optim_Info const& optims) -> Slice<T>
+    proc pow_by_squaring(Slice<T>* to, Slice<T>* aux, Slice<const T> num, size_t power, Optims const& optims) -> Slice<T>
     {
         assert(is_striped_number(num));
         //no two can alias
@@ -1999,11 +1986,12 @@ namespace tiny_num
         assert(are_aliasing<T>(*aux, num) == false);
         assert(are_aliasing<T>(*aux, *to) == false);
 
-        const size_t required_size = required_pow_out_size(num, power);
-        const size_t required_sigle_aux = required_pow_by_squaring_single_aux_swap_size<T>(num, power);
+        size_t bit_size = log2(num);
+        const size_t required_size = required_pow_out_size(bit_size, power, BIT_SIZE<T>);
+        const size_t required_sigle_aux = required_pow_by_squaring_single_aux_swap_size(bit_size, power, BIT_SIZE<T>);
 
         assert(to->size >= required_size);
-        assert(aux->size >= required_pow_by_squaring_aux_size(num, power));
+        assert(aux->size >= required_pow_by_squaring_aux_size(bit_size, power, BIT_SIZE<T>));
 
         if(power == 0 || (num.size == 1 && num[0] == 1))
         {
@@ -2077,8 +2065,7 @@ namespace tiny_num
         return curr_output;
     }
 
-    template <typename T>
-    func required_trivial_pow_aux_size(Slice<const T> num, size_t power) -> size_t
+    func required_pow_trivial_aux_size(size_t num_bit_size, size_t power, size_t single_digit_bit_size) -> size_t
     {
         if(power <= 1)
             return 0;
@@ -2086,12 +2073,16 @@ namespace tiny_num
         //minus one since in the algorhitm we always multiply from output buffer to auxiliary
         // so that the final mutliply will be to the output buffer
         // => the maximum power that will be stored in the auxiliary is one less
-        return required_pow_out_size(num, power - 1);
+        return required_pow_out_size(num_bit_size, power - 1, single_digit_bit_size);
+    }
+    
+    func required_pow_aux_size(size_t num_bit_size, size_t power, size_t single_digit_bit_size) -> size_t
+    {
+        return required_pow_trivial_aux_size(num_bit_size, power, single_digit_bit_size);
     }
 
-
     template <typename T>
-    proc trivial_pow(Slice<T>* to, Slice<T>* aux, Slice<const T> num, size_t power, Optim_Info const& optims) -> Slice<T>
+    proc pow_trivial(Slice<T>* to, Slice<T>* aux, Slice<const T> num, size_t power, Optims const& optims) -> Slice<T>
     {
         assert(is_striped_number(num));
 
@@ -2099,8 +2090,8 @@ namespace tiny_num
         assert(are_aliasing<T>(*aux, num) == false);
         assert(are_aliasing<T>(*aux, *to) == false);
 
-        const size_t required_to_size = required_pow_out_size(num, power);
-        const size_t required_aux_size = required_trivial_pow_aux_size(num, power);
+        const size_t required_to_size = required_pow_out_size(log2(num), power, BIT_SIZE<T>);
+        const size_t required_aux_size = required_pow_trivial_aux_size(log2(num), power, BIT_SIZE<T>);
         assert(to->size >= required_to_size);
         assert(aux->size >= required_aux_size);
 
@@ -2140,51 +2131,23 @@ namespace tiny_num
     }
 
     template <typename T>
-    proc pow(Slice<T>* to, Slice<T>* aux, Slice<const T> num, size_t power, Optim_Info const& optims) -> Slice<T>
+    proc pow(Slice<T>* to, Slice<T>* aux, Slice<const T> num, size_t power, Optims const& optims) -> Slice<T>
     {
-        size_t at_least_to = required_pow_out_size(num, power);
-        size_t at_least_aux = required_trivial_pow_aux_size(num, power);
+        size_t bitsize = log2(num);
+        size_t at_least_to = required_pow_out_size(bitsize, power, BIT_SIZE<T>);
+        size_t at_least_aux = required_pow_trivial_aux_size(bitsize, power, BIT_SIZE<T>);
         assert(to->size >= at_least_to);
         assert(aux->size >= at_least_aux);
 
-        if(power < optims.trivial_pow_below_power)
-            return trivial_pow<T>(to, aux, num, power, optims);
+        if(power < optims.pow_trivial_below_power)
+            return pow_trivial<T>(to, aux, num, power, optims);
 
-        const size_t required_to_size = required_pow_out_size(num, power);
-        const size_t required_aux_size = required_pow_by_squaring_aux_size(num, power);
+        const size_t required_aux_size = required_pow_by_squaring_aux_size(bitsize, power, BIT_SIZE<T>);
 
-        if(to->size >= required_to_size && aux->size >= required_aux_size)
+        if(aux->size >= required_aux_size)
             return pow_by_squaring(to, aux, num, power, optims);
 
-        return trivial_pow<T>(to, aux, num, power, optims);
-
-        const size_t bits = (log2(num) + 1);
-
-        //upper estimate for single swap aux
-        //size_t required_sing_swap_aux_size_rough = (bits*power / BIT_SIZE<T> + 2);
-        //size_t total_aux_size_rough = (bits*power / BIT_SIZE<T> + 2) * 2;
-        //=> 
-        // required = ([bits*power / BIT_SIZE<T>] + 2) * 2
-        // required/2 - 2 = [bits*power / BIT_SIZE<T>]
-        // (required/2 - 2) * BIT_SIZE<T> = [bits*power] - bits*power%BIT_SIZE<T>
-        // [bits*power] = (required/2 - 2) * BIT_SIZE<T> + bits*power%BIT_SIZE<T>
-        // power = ((required/2 - 2) * BIT_SIZE<T> + bits*power%BIT_SIZE<T>) / bits
-        // power < (required/2 - 2) * BIT_SIZE<T> / bits
-
-        size_t max_aux_power = (aux->size/2 - 2) * BIT_SIZE<T> / bits;
-        size_t max_to_power = (aux->size - 2) * BIT_SIZE<T> / bits;
-    
-        size_t max_pow_by_squaring_power = min(max_aux_power, max_to_power);
-        size_t remianing_power = power - max_pow_by_squaring_power;
-        //@TODO: try one power higher than the one caluclated and see if that fit
-        // (rounding errors)
-
-        Slice<T> half_powed = pow_by_squaring(to, aux, num, max_pow_by_squaring_power, optims);
-        Slice<T> new_num = trim(*aux, half_powed.size);
-        Slice<T> remaining_aux = slice(*aux, half_powed.size);
-        copy_slice<T>(&new_num, *to, Iter_Direction::NO_ALIAS);
-
-        return trivial_pow<T>(to, &remaining_aux, new_num, remianing_power, optims);
+        return pow_trivial<T>(to, aux, num, power, optims);
     }
 
 
@@ -2194,7 +2157,7 @@ namespace tiny_num
         return estimate_bit_size;
     }
 
-    func root_required_out_size(size_t num_bit_size, size_t root, size_t single_digit_bit_size) -> size_t {
+    func required_root_out_size(size_t num_bit_size, size_t root, size_t single_digit_bit_size) -> size_t {
         if(root == 0)
             return 1;
 
@@ -2205,53 +2168,63 @@ namespace tiny_num
         return div_round_up(root_estimate_bit_size(num_bit_size, root), single_digit_bit_size) + 1;
     }
 
-    func root_required_aux_size(size_t num_bit_size, size_t root, size_t single_digit_bit_size) -> size_t {
+    func optimal_root_aux_size(size_t num_bit_size, size_t root, size_t single_digit_bit_size) -> size_t {
 
-        size_t other_estimate_size = root_required_out_size(num_bit_size, root, single_digit_bit_size);
+        size_t other_estimate_size = required_root_out_size(num_bit_size, root, single_digit_bit_size);
         size_t pow_aux_size = required_pow_by_squaring_aux_size(num_bit_size, root, single_digit_bit_size);
         size_t pow_to_size = required_pow_by_squaring_aux_size(num_bit_size, root, single_digit_bit_size);
 
         return other_estimate_size + pow_aux_size + pow_to_size;
     }
 
+    func required_root_aux_size(size_t num_bit_size, size_t root, size_t single_digit_bit_size) -> size_t {
 
-    u64 single_root_shifting(u64 x, u64 n)
+        size_t other_estimate_size = required_root_out_size(num_bit_size, root, single_digit_bit_size);
+        size_t pow_aux_size = required_pow_aux_size(num_bit_size, root, single_digit_bit_size);
+        size_t pow_to_size = required_pow_aux_size(num_bit_size, root, single_digit_bit_size);
+
+        return other_estimate_size + pow_aux_size + pow_to_size;
+    }
+
+    template <typename T>
+    func single_root_shifting(T x, T n) -> T
     {
         if(n == 0)
             return 1;
         if (x <= 1) 
             return x;
 
-        u64 r = 1;
-        u64 s = ((find_last_set_bit(x) / n) * n);
+        T r = 1;
+        T s = ((find_last_set_bit(x) / n) * n);
 
         while(true)
         {
-            if(s < n) //fast
+            if(s < n)
                 break;
 
-            s -= n; //fast
-            r <<= 1; //O(n)
-            u64 power = single_pow_by_squaring(r | 1, n); //slow
-            u64 bit = power <= (x >> s);
+            s -= n; 
+            r <<= 1; 
+            T power = single_pow_by_squaring<T>(r | 1, n);
+            T bit = power <= (x >> s);
             r |= bit;
         }
 
         return r;
     }
 
-    u64 single_root_newton(u64 of_value, u64 power)
+    template <typename T>
+    func single_root_newton(T of_value, T power) -> T
     {
-        const u64 x = of_value; 
-        const u64 n = power;
+        const T x = of_value; 
+        const T n = power;
 
         if(x == 0)
             return 1;
         if (x <= 1) 
             return x;
 
-        //u64 u = x;
-        //u64 s = x+1;
+        //T u = x;
+        //T s = x+1;
 
         // We want to find such r that:
         //   r^n = x
@@ -2270,16 +2243,16 @@ namespace tiny_num
         //  so the upper estimate for r is:
         //      2^[ ([log2(x)] + n) / n ]
 
-        const u64 log2x = find_last_set_bit(x);
+        const T log2x = find_last_set_bit(x);
 
-        const u64 upper_initial_estimate = cast(u64) 1 << ((log2x + n) / n);
-        u64 r = upper_initial_estimate;
-        u64 prev_r = -1;
+        const T upper_initial_estimate = cast(T) 1 << ((log2x + n) / n);
+        T r = upper_initial_estimate;
+        T prev_r = -1;
 
         while(true)
         {
             // the newton update
-            u64 new_upper_r = (n-1) * r + x / single_pow_by_squaring(r, n-1);
+            T new_upper_r = (n-1) * r + x / single_pow_by_squaring(r, n-1);
 
             prev_r = r;
             r = new_upper_r / n;
@@ -2296,11 +2269,11 @@ namespace tiny_num
     }
 
     template <typename T>
-    proc root(Slice<T>* to, Slice<T>* aux, Slice<const T> num, size_t root, Optim_Info const& optims) -> Slice<T>
+    proc root(Slice<T>* to, Slice<T>* aux, Slice<const T> num, size_t root, Optims const& optims) -> Slice<T>
     {
         size_t num_bit_size = log2(num);   
-        size_t required_to_size = root_required_out_size(num.size, root, BIT_SIZE<T>);
-        size_t required_aux_size = root_required_aux_size(num_bit_size, root, BIT_SIZE<T>);
+        size_t required_to_size = required_root_out_size(num.size, root, BIT_SIZE<T>);
+        size_t required_aux_size = required_root_aux_size(num_bit_size, root, BIT_SIZE<T>);
 
         assert(to->size >= required_to_size);
         assert(aux->size >= required_aux_size);
@@ -2321,7 +2294,7 @@ namespace tiny_num
 
         if(num.size == 1)
         {
-            to->data[0] = cast(T) single_root_shifting(cast(u64) num[0], cast(u64) root);
+            to->data[0] = cast(T) single_root_shifting(num[0], cast(T) root);
             return trim(*to, 1);
         }
         size_t estimate_bit_size = root_estimate_bit_size(num_bit_size, root);
@@ -2350,7 +2323,7 @@ namespace tiny_num
 
             
             //the sizes we will need to store the results:
-            size_t powed_size = required_pow_to_size<T>(prev_estimate, root - 1);
+            size_t powed_size = required_pow_out_size(log2(prev_estimate), root - 1, BIT_SIZE<T>);
             size_t muled_size = required_mul_out_size(prev_estimate.size, 1);
 
             //assert(powed_size <= num.size && "is it?");
@@ -2369,7 +2342,7 @@ namespace tiny_num
             Slice<T> rem_to = trim(after_div_aux, rem_size);
 
 
-            Div_Res<T> res = unwrap(div<T>(&div_to, &rem_to, num, powed, optims));
+            Div_Result<T> res = div<T>(&div_to, &rem_to, num, powed, optims);
             Slice<T> dived = res.quotient;
             assert(is_striped_number(dived));
 
@@ -2417,6 +2390,95 @@ namespace tiny_num
         return dest;
     }
 
+    template <typename T>
+    func single_log_heyley(T of_value, T base) -> T
+    {
+        const T x = of_value;
+        const T b = base;
+
+        //b^y = x
+        //y = log_b(x)
+
+        if(x <= 1)
+            return 0;
+        if(base <= 1)
+            return 0;
+
+        const T log2x = find_last_set_bit(x);
+        const T log2b = find_last_set_bit(b);
+
+        assert(log2x != 0);
+        assert(log2b != 0);
+
+        const T lower_initial_estimate = log2x / (log2b + 1);
+        const T higher_initial_estimate = (log2x + log2b) / (log2b);
+        T y = higher_initial_estimate;
+        T prev_y = y;
+
+        while(true)
+        {
+            T value_from_curr_approximate = single_pow_by_squaring(b, y);
+            T c_x = value_from_curr_approximate;
+
+            prev_y = y;
+            if(c_x <= x)
+                break;
+
+            T new_y = y - 2*(c_x - x) / (x + c_x);
+
+            //if we didnt move at all we are one above the answer
+            if(new_y == y)
+                return new_y - 1;
+
+            y = new_y;
+        }
+
+        return prev_y;
+
+    }
+
+    template <typename T>
+    func single_log_bsearch(T of_value, T base) -> T
+    {
+        const T x = of_value;
+        const T b = base;
+
+        if(x <= 1)
+            return 0;
+        if(base <= 1)
+            return 0;
+
+        const T log2x = find_last_set_bit(x);
+        const T log2b = find_last_set_bit(b);
+
+        assert(log2x != 0);
+        assert(log2b != 0);
+
+        const T lower_initial_estimate = log2x / (log2b + 1);
+        const T higher_initial_estimate = (log2x + log2b) / (log2b);
+
+        T curr_lo = lower_initial_estimate;
+        T curr_hi = higher_initial_estimate;
+
+        while(true)
+        {
+            T mid = (curr_lo + curr_hi) / 2;
+            T curr_approx = single_pow_by_squaring(b, mid);
+
+            if(curr_approx > x)
+                curr_hi = mid;
+            else if(curr_approx < x)
+                curr_lo = mid + 1;
+            else
+                return mid;
+
+            if(curr_hi <= curr_lo)
+                break;
+        }
+
+        return curr_lo - 1;
+    }
+
 
     template <typename T>
     proc reverse(Slice<T>* arr) -> void
@@ -2427,11 +2489,10 @@ namespace tiny_num
             std::swap(ref[i], ref[ref.size - i - 1]);
     }
 
-
     struct Power_And_Powed
     {
-        size_t power;
-        size_t powed;
+        size_t power = 0;
+        size_t powed = 0;
 
         bool constexpr operator ==(Power_And_Powed const&) const noexcept = default;
     };
@@ -2465,131 +2526,287 @@ namespace tiny_num
             return {(type_bit_size - 1)/4, 1ull << (((type_bit_size - 1)/4) * 4)};
         }
 
-        size_t current = 1;
-        size_t power = 0;
+        size_t max = 0;
         if(type_bit_size < 64)
-        {
-            size_t max = 1ull << type_bit_size;
-            while(true)
-            {
-                size_t next = current * base;
-                if(next >= max)
-                    break;
+            max = (1ull << type_bit_size) - 1;
+        else
+            max = cast(size_t) -1;
 
-                current = next;
-                power ++;
-            }
-        }
-        else if(type_bit_size == 64)
-        {
-            while(true)
-            {
-                size_t next = current * base;
-                if(next <= current)
-                    break;
+        size_t power = single_log_bsearch<size_t>(max, base);
+        size_t powed = single_pow_by_squaring<size_t>(base, power);
 
-                current = next;
-                power ++;
-            }
-        }
-
-        return {power, current};
+        return {power, powed};
     }
 
-    //what is the size of the output buffer when converting from number to its in base rep?
-    template <typename Num>
-    func required_to_base_out_size(size_t num_size, size_t to_base) -> size_t
+    func required_to_base_out_size(size_t num_size, size_t to_base, size_t single_digit_bit_size) -> size_t
     {
-        Power_And_Powed highest = highest_power_of_in_type(HALF_BIT_SIZE<Num>, to_base); 
+        Power_And_Powed highest = highest_power_of_in_type(single_digit_bit_size / 2, to_base); 
         
         //into a single digit fits `power` powers of to_base
         // => we need to `power + 1` to_base to represent any number of the digit
         // => into the whole number fit `num_size * power` powers
         // => we need `num_size * (power + 1)` digits
         //@TODO: why do we need the +highest.power?
-        return num_size * 2 * (highest.power + 1) +highest.power;
+        return num_size * 2 * (highest.power + 1) + highest.power;
     }
 
-    //what is the size of the output buffer when converting from base rep to number?
+    auto required_from_base_out_size(size_t rep_size, size_t from_base, size_t single_digit_bit_size) -> size_t
+    {
+        Power_And_Powed highest = highest_power_of_in_type(single_digit_bit_size / 2, from_base); 
+
+        //[][][][][]
+        //----|----| 
+        //  => 3 rep digits per num digit
+        //  => we just need num digits / rep digits per digit rounded up
+        return div_round_up(rep_size, highest.power);
+    }
+
     template <typename Num>
-    auto required_from_base_out_size(size_t represenation_size, size_t from_base) -> size_t
+    struct Optional_Slice
     {
-        //to_size = from_size * log(from_base) / log(to_base);
-        double bit_size = cast(double) represenation_size * log(cast(double) from_base) / log(2.0);
-        size_t max_bits = cast(size_t) ceil(bit_size);
-        size_t digits = (max_bits + BIT_SIZE<Num> - 1) / BIT_SIZE<Num>;
-        return digits;
-    }
-
-    struct To_Base_State
-    {
-        size_t index = 0;
-        size_t buffer_size = 0;
-    };
-
-    template <typename Rep>
-    struct To_Base_Result
-    {
-        Rep value;
-        To_Base_State state;
-        bool finished = true;
+        bool ok;
+        Slice<Num> slice;
     };
 
     template <typename Num>
-    func to_base_init(Slice<const Num> num) -> To_Base_State
+    struct Pop_Digit
     {
-        assert(is_striped_number(num));
-        return To_Base_State{0, num.size};
-    }
+        Slice<Num> buffer;
+        Slice<const Num> number; //can also point into a different buffer from buffer
+        size_t stashed_base = 0;
+        size_t stashed_value = 0;
+        size_t stashed_power = 0;
+        Power_And_Powed highest;
 
-    template <typename Num>
-    proc to_base_convert(To_Base_State state, Slice<Num>* temp, Slice<const Num> num, Num base, Optim_Info const& optims) -> To_Base_Result<Num>
-    {
-        static_assert(is_allowed_digit<Num>);
-        assert(is_striped_number(num));
-        assert(temp->size >= num.size && "temp must be big enough");
-        assert(base >= 2 && "base must be bigger than two");
-        assert(high_bits(base) == 0 && "base must be low bits only of Num type (so that short div algorhimt can be used)");
-
-        if(state.buffer_size == 0)
-            return To_Base_Result<Num>{0, state, true};
-
-        size_t buff_size = state.buffer_size;
-        Slice<Num> curr_buff = trim(*temp, buff_size);
-        Slice<const Num> curr_div_from;
-        if(state.index == 0)  
-            curr_div_from = trim(num, buff_size);
-        else
-            curr_div_from = curr_buff;
-
-        let res = batch_div_overflow<Num>(&curr_buff, curr_div_from, base, optims);
-        let digit = res.overflow;
-        if(last(curr_buff) == 0)
+        enum Error
         {
-            assert(buff_size != 0);
-            buff_size = buff_size - 1;
+            OK,
+            BASE_TOO_LARGE,
+            BASE_TOO_SMALL,
+            SMALL_BUFFER,
+            NON_STRIPPED_NUM
+        } error = OK;
+        bool ok = true;
+    };
+
+    template <typename Num>
+    func pop_digit_init(Slice<Num>* buffer, Slice<const Num> num, Num base) -> Pop_Digit<Num>
+    {
+        Pop_Digit popper = Pop_Digit{*buffer, num, cast(size_t) base};
+
+        popper.highest = highest_power_of_in_type(HALF_BIT_SIZE<Num>, cast(size_t) base);
+        if(high_bits(base) != 0)
+        {
+            popper.error = Pop_Digit<Num>::BASE_TOO_LARGE;
+            popper.ok = false;
         }
 
-        let new_state = To_Base_State{state.index + 1, buff_size};
-        return To_Base_Result<Num>{digit, new_state, false};
+        if(base < 2)
+        {
+            popper.error = Pop_Digit<Num>::BASE_TOO_SMALL;
+            popper.ok = false;
+        }
+
+        if(buffer->size < num.size)
+        {
+            popper.error = Pop_Digit<Num>::SMALL_BUFFER;
+            popper.ok = false;
+        }
+
+        if(is_striped_number(num) == false)
+        {
+            popper.error = Pop_Digit<Num>::NON_STRIPPED_NUM;
+            popper.ok = false;
+        }
+
+        return popper;
     }
 
-    template <typename Rep>
-    proc to_base_finish(Slice<Rep>* rep) -> Slice<Rep>
+    template <typename Num>
+    proc pop_digit(Pop_Digit<Num>* state, Optims const& optims) -> Num
     {
-        static_assert(is_allowed_digit<Rep>);
-        reverse(rep);
-        return *rep;
+        static_assert(is_allowed_digit<Num>, "!");
+
+        if(state->stashed_power == 0)
+        {
+            if(state->number.size == 0)
+            {
+                state->ok = false; 
+                return -1;
+            }
+
+            Batch_Overflow<Num> res = batch_div_overflow<Num>(&state->buffer, state->number, cast(Num) state->highest.powed, optims);
+
+            state->stashed_power = state->highest.power;
+            state->stashed_value = res.overflow;
+            state->number = striped_trailing_zeros(res.slice);
+        }
+
+        bool is_last_block = state->number.size == 0;
+        if(is_last_block && state->stashed_value == 0)
+        {
+            state->ok = false; 
+            return -1;
+        }
+
+        Num digit = cast(Num) state->stashed_value % state->stashed_base;
+        state->stashed_value /= state->stashed_base;
+        state->stashed_power -= 1;
+
+        return digit;
+    }
+
+    template <typename Num>
+    struct Push_Digit
+    {
+        Slice<Num> buffer;
+        size_t num_size = 0;
+        size_t stashed_base = 0;
+        size_t stashed_digit = 0;
+        size_t stashed_power = 0;
+        Power_And_Powed highest;
+    };
+
+    template <typename Num>
+    func push_digit_init(Slice<Num>* buffer, size_t num_size = 0) -> Push_Digit<Num>
+    {
+        Push_Digit pusher = Push_Digit{*buffer, num_size};
+        return pusher;
+    }
+
+    template <typename Num>
+    func push_digit(Push_Digit<Num>* state, Num digit, Num base, Optims const& optims, bool flush = false) -> bool
+    {
+        static_assert(is_allowed_digit<Num>, "!");
+        if(base < 2 || digit > base || state->num_size + 1 > state->buffer.size)
+            return false;
+        
+        if(base != state->stashed_base)
+        {
+            if(state->stashed_power != 0)
+                if(push_digit<Num>(state, 0, cast(Num) state->stashed_base, optims, true))
+                    return false;
+
+            state->highest = highest_power_of_in_type(BIT_SIZE<Num>, base);
+            state->stashed_base = cast(size_t) base;
+        }
+
+        if(state->num_size + 1 > state->buffer.size)
+            assert(false && "shouldnt be possible");
+
+        //flush only attempts to flush stashed_digit into the num buffer
+        if(flush == false)
+        {
+            state->stashed_digit *= base;
+            state->stashed_digit += cast(size_t) digit;
+            state->stashed_power += 1;
+
+            if(state->stashed_power < state->highest.power)
+                return state;
+        }
+
+        Num powed = cast(Num) state->highest.powed;
+        if(flush)
+            powed = single_pow_trivial<Num>(base, cast(Num) state->stashed_power);
+
+        Slice<Num> curr_num = trim(state->buffer, state->num_size);
+        size_t overflown_times = 0;
+
+        let mul_res = batch_mul_overflow<Num>(&curr_num, curr_num, powed, optims);
+        if(mul_res.overflow != 0)
+        {
+            overflown_times += 1;
+            state->num_size += 1;
+            curr_num = trim(state->buffer, state->num_size);
+            curr_num[state->num_size - 1] = mul_res.overflow;
+        }
+
+        let add_res = batch_add_overflow_short<Num>(&curr_num, curr_num, cast(Num) state->stashed_digit, Location::IN_PLACE);
+        if(add_res.overflow != 0)
+        {
+            overflown_times += 1;
+            state->num_size += 1;
+            curr_num = trim(state->buffer, state->num_size);
+            curr_num[state->num_size - 1] = add_res.overflow;
+        }
+
+        assert(overflown_times < 2 && "shouldt be possible to overflow 2 times");
+        state->stashed_power = 0;
+        state->stashed_digit = 0;
+        return true;
+    }
+
+    template <typename Num>
+    proc push_digit_result(Push_Digit<Num>* state, Optims const& optims) -> Optional_Slice<Num>
+    {
+        if(state->stashed_power != 0)
+        {
+            if(push_digit<Num>(state, 0, cast(Num) state->stashed_base, optims, true) == false)
+                return Optional_Slice<Num>{false};
+        }
+
+        return Optional_Slice<Num>{true, trim(state->buffer, state->num_size)};
+    }
+    
+    template <typename Num, typename Rep, typename Conversion_Fn>
+    proc from_base(Slice<Num>* num, Slice<const Rep> rep, Num base, Conversion_Fn conversion, Optims const& optims) -> Optional_Slice<Num>
+    {
+        static_assert(is_allowed_digit<Num>, "!");
+        static_assert(sizeof(Num) >= sizeof(Rep), "!");
+        if constexpr(std::is_same_v<Rep, Num>)
+            assert(check_are_aliasing<Rep>(rep, *num) == false);
+
+        assert(required_from_base_out_size(rep.size, base, BIT_SIZE<Num>) <= num->size 
+            && "there must be enough size in num to represent the number even in the worst case scenario");
+
+        mut state = push_digit_init(num);
+        
+        for(size_t i = 0; i < rep.size; i++)
+        {
+            Num digit = conversion(rep[i]);
+            if(push_digit(&state, digit, base, optims) == false)
+                return {false};
+        }
+
+        return push_digit_result(&state, optims);
     }
 
     template <typename Num, typename Rep, typename Conversion_Fn>
-    proc to_base(Slice<Rep>* rep, Slice<Num>* temp, Slice<const Num> num, Num base, Conversion_Fn conversion, Optim_Info const& optims) -> Slice<Rep>
+    proc to_base_ensembled(Slice<Rep>* rep, Slice<Num>* temp, Slice<const Num> num, Num base, Conversion_Fn conversion, Optims const& optims) -> Slice<Rep>
     {
-        static_assert(is_allowed_digit<Num>);
-        static_assert(sizeof(Rep) <= sizeof(Num));
+        static_assert(is_allowed_digit<Num>, "!");
+        if constexpr(std::is_same_v<Num, Rep>)
+            assert(check_are_aliasing<Num>(num, *rep) == false);
 
-        using Converted = decltype(conversion(cast(Num) 0));
-        static_assert(std::is_same_v<Converted, Rep>);
+        if constexpr (DO_RUNTIME_ONLY)
+        {
+            size_t at_least = required_to_base_out_size<Num>(num.size, base);
+            assert(at_least <= rep->size && "there must be enough size rep represent the number even in the worst case scenario");
+        }
+
+        mut state = pop_digit_init<Num>(temp, num, base);
+        size_t i = 0;
+        for(; ; i++)
+        {
+            Num popped = pop_digit(&state, optims);
+            if(state.ok == false)
+                break;
+
+            Rep converted = conversion(popped);
+            (*rep)[i] = converted;
+        }
+
+        assert(state.error == Pop_Digit<Num>::OK);
+        Slice<Rep> converted = trim(*rep, i);
+        reverse(&converted);
+        return converted;
+    }
+
+    template <typename Num, typename Rep, typename Conversion_Fn>
+    proc to_base(Slice<Rep>* rep, Slice<Num>* temp, Slice<const Num> num, Num base, Conversion_Fn conversion, Optims const& optims) -> Slice<Rep>
+    {
+        static_assert(is_allowed_digit<Num>, "!");
+        static_assert(sizeof(Rep) <= sizeof(Num), "!");
 
         if constexpr(std::is_same_v<Num, Rep>)
             assert(check_are_aliasing<Num>(num, *rep) == false);
@@ -2599,11 +2816,8 @@ namespace tiny_num
         assert(base >= 2 && "base must be bigger than two");
         assert(high_bits(base) == 0 && "base must be low bits only of Num type (so that short div algorhimt can be used)");
 
-        if constexpr (DO_RUNTIME_ONLY)
-        {
-            size_t at_least = required_to_base_out_size<Num>(num.size, base);
-            assert(at_least <= rep->size && "there must be enough size rep represent the number even in the worst case scenario");
-        }
+        size_t at_least = required_to_base_out_size(num.size, base, BIT_SIZE<Num>);
+        assert(at_least <= rep->size && "there must be enough size rep represent the number even in the worst case scenario");
 
         bool is_first = true;
         size_t to_size = 0;
@@ -2615,23 +2829,24 @@ namespace tiny_num
         Power_And_Powed highest = highest_power_of_in_type(HALF_BIT_SIZE<Num>, base);
         assert(highest.powed > 1);
 
-        //convert
-        Slice<Num> val_left = *temp;
-        while(true)
+        Slice<const Num> val_current = num;
+        bool iterate = true;
+        while(iterate)
         {
-            const Slice<const Num> curr_div_from = is_first ? num : val_left;
-            //if(curr_div_from.size == 0)
-            //break;
+            Batch_Overflow<Num> res = batch_div_overflow<Num>(temp, val_current, cast(Num) highest.powed, optims);
 
-            Batch_Overflow<Num> res = batch_div_overflow<Num>(&val_left, curr_div_from, cast(Num) highest.powed, optims);
             Num highest_power_rem = res.overflow;
-            val_left = striped_trailing_zeros(val_left);
+            val_current = striped_trailing_zeros(res.slice);
 
-            if(curr_div_from.size == 0 && highest_power_rem == 0)
-                break;
-
+            bool is_last_block = val_current.size == 0;
             for(size_t j = 0; j < highest.power; j++)
             {
+                if(is_last_block && highest_power_rem == 0)
+                {
+                    iterate = false;
+                    break;
+                }
+
                 Num rem = highest_power_rem % base;
                 Rep digit = conversion(rem);
                 (*rep)[to_size] = digit;
@@ -2640,222 +2855,77 @@ namespace tiny_num
                 highest_power_rem /= base;
             }
 
+
             is_first = false;
         }
 
-
-        //finish
-        Slice<Rep> converted = striped_trailing_zeros(trim(*rep, to_size));
-        assert(is_striped_number(converted));
+        Slice<Rep> converted = trim(*rep, to_size);
         reverse(&converted);
         return converted;
     }
 
-    struct From_Base_State
+    func single_factorial(size_t of_value) -> size_t
     {
-        size_t index = 0;
-        size_t buffer_size = 0;
-        size_t required_size = 0;
-    };
+        size_t calculated = 1;
+        for(size_t factor = 2; factor <= of_value; factor++)
+            calculated *= factor;
 
-    func from_base_init() -> From_Base_State
-    {
-        return {0, 0, 1};
+        return calculated;
     }
 
-    template <typename Num>
-    proc from_base_convert(From_Base_State state, Slice<Num>* num, Num digit, Num base, Optim_Info const& optims) -> From_Base_State
+    static constexpr size_t MAX_NATIVE_FACTORIAL = 20;
+
+    func single_factorial_fast(size_t of_value) -> size_t
     {
-        static_assert(is_allowed_digit<Num>);
-
-        //digit could have also had in general bigger type than Num
-        // (we would just convert from the number to static buffer and then 
-        //  add the result) but I believe that is such a specific case it would
-        //  just make testing harder 
-        assert(base > digit && "all digits must be valid");
-
-        size_t curr_size = state.buffer_size;
-        size_t required_size = curr_size + 1;
-
-        if(num->size < required_size)
-        {
-            From_Base_State new_state = state;
-            new_state.required_size = required_size;
-            return new_state;
+        switch(of_value) {
+            case 0: return single_factorial(0);
+            case 1: return single_factorial(1);
+            case 2: return single_factorial(2);
+            case 3: return single_factorial(3);
+            case 4: return single_factorial(4);
+            case 5: return single_factorial(5);
+            case 6: return single_factorial(6);
+            case 7: return single_factorial(7);
+            case 8: return single_factorial(8);
+            case 9: return single_factorial(9);
+            case 10: return single_factorial(10);
+            case 11: return single_factorial(11);
+            case 12: return single_factorial(12);
+            case 13: return single_factorial(13);
+            case 14: return single_factorial(14);
+            case 15: return single_factorial(15);
+            case 16: return single_factorial(16);
+            case 17: return single_factorial(17);
+            case 18: return single_factorial(18);
+            case 19: return single_factorial(19);
+            case 20: return single_factorial(20);
+            default: return -1;
         }
-        
-        Slice<Num> curr_num = trim(*num, curr_size);
-        size_t overflows_had = 0;
-
-        let mul_res = batch_mul_overflow<Num>(&curr_num, curr_num, base, optims);
-        if(mul_res.overflow != 0)
-        {
-            curr_size += 1;
-            overflows_had += 1;
-            curr_num = trim(*num, curr_size);
-            curr_num[curr_size - 1] = mul_res.overflow;
-        }
-
-        let add_res = batch_add_overflow_short<Num>(&curr_num, curr_num, digit, Op_Location::IN_PLACE);
-        if(add_res.overflow != 0)
-        {
-            curr_size += 1;
-            overflows_had += 1;
-            curr_num = trim(*num, curr_size);
-            curr_num[curr_size - 1] = add_res.overflow;
-        }
-
-        assert(overflows_had < 2 && "it shouldnt be possible to overflow twice when the digit is under base");
-        From_Base_State new_state = state;
-        new_state.index += 1;
-        new_state.buffer_size = curr_size;
-
-        return new_state;
     }
 
-    template <typename Num>
-    proc from_base_finish(Slice<Num>* num) -> Slice<Num>
+    func required_factorial_size(size_t of_value) -> size_t
     {
-        static_assert(is_allowed_digit<Num>);
-        return striped_trailing_zeros(*num);
+        if(of_value <= MAX_NATIVE_FACTORIAL)
+            return 1;
+        else
+            return of_value - MAX_NATIVE_FACTORIAL;
     }
-
-    /*
-    template <typename Num, typename Rep>
-    proc from_base2(Slice<Num>* num, Slice<const Rep> rep, Num base, Optim_Info const& optims) -> Slice<Num>
-    {
-        static_assert(is_allowed_digit<Num>);
-        static_assert(sizeof(Num) >= sizeof(Rep));
-        assert(is_striped_representation(rep));
-        if constexpr(std::is_same_v<Rep, Num>)
-            assert(check_are_aliasing<Rep>(rep, *num) == false);
-
-        if constexpr (DO_RUNTIME_ONLY)
-        {
-            size_t at_least = required_from_base_out_size<Num>(rep.size, base);
-            assert(at_least <= num->size && "there must be enough size in num to represent the number even in the worst case scenario");
-        }
-
-        null_n(num->data, num->size);
-        mut state = from_base_init();
-
-        while(state.index < rep.size)
-        {
-            assert(state.required_size <= num->size);
-            Num digit = cast(Num) rep[state.index];
-            let new_state = from_base_convert<Num>(state, num, digit, base, optims);
-            state = new_state;
-        }
-
-        Slice<Num> trimmed_num = trim(*num, state.buffer_size);
-        return from_base_finish(&trimmed_num);
-    }
-
-    template <typename Num, typename Rep>
-    proc to_base2(Slice<Rep>* rep, Slice<Num>* temp, Slice<const Num> num, Num base, Optim_Info const& optims) -> Slice<Rep>
-    {
-        static_assert(is_allowed_digit<Num>);
-        static_assert(sizeof(Rep) >= sizeof(Num));
-        if constexpr(std::is_same_v<Num, Rep>)
-            assert(check_are_aliasing<Num>(num, *rep) == false);
-
-        if constexpr (DO_RUNTIME_ONLY)
-        {
-            size_t at_least = required_to_base_out_size<Num>(num.size, base);
-            assert(at_least <= rep->size && "there must be enough size rep represent the number even in the worst case scenario");
-        }
-
-        To_Base_State state = to_base_init(num);
-        while(true)
-        {
-            let res = to_base_convert(state, temp, num, base, optims);
-            if(res.finished)
-                break;
-
-            (*rep)[state.index] = cast(Rep) res.value;
-            state = res.state;
-        }
-
-        Slice<Rep> trimmed_rep = trim(*rep, state.index);
-        return to_base_finish(&trimmed_rep);
-    }
-    */
-
-    //100_000_000
-
-    template <typename Num, typename Rep, typename Conversion_Fn>
-    proc from_base(Slice<Num>* num, Slice<const Rep> rep, Num base, Conversion_Fn conversion, Optim_Info const& optims) -> Slice<Num>
-    {
-        static_assert(is_allowed_digit<Num>);
-        static_assert(sizeof(Num) >= sizeof(Rep));
-
-        using Converted = decltype(conversion(cast(Rep) 0));
-        static_assert(std::is_same_v<Converted, Num>);
-
-        assert(is_striped_representation(rep));
-        if constexpr(std::is_same_v<Rep, Num>)
-            assert(check_are_aliasing<Rep>(rep, *num) == false);
-
-        if constexpr (DO_RUNTIME_ONLY)
-        {
-            size_t at_least = required_from_base_out_size<Num>(rep.size, base);
-            assert(at_least <= num->size && "there must be enough size num represent the number even in the worst case scenario");
-        }
-
-        //size_t highest_power = highest_power_of_in_type(BIT_SIZE<Num>, base);
-        //assert(highest_power > 1);
-
-        null_n(num->data, num->size);
-
-        size_t from_size = sizeof(Rep);
-        size_t to_size = sizeof(Num);
-
-        //while(true)
-        for(size_t i = 0; i < rep.size; i++)
-        {
-            Num digit = conversion(rep[i]);
-            assert(base > digit && "all digits must be valid");
-
-            Slice<Num> added = {&digit, 1};
-            let mul_res = batch_mul_overflow<Num>(num, *num, base, optims);
-            let add_res = batch_add_overflow_short<Num>(num, *num, digit, Op_Location::IN_PLACE);
-
-            assert(add_res.overflow == 0);
-            assert(mul_res.overflow == 0);
-        }
-
-        return striped_trailing_zeros(*num);
-    }
-
-
 
     template <typename T>
-    proc factorial(Slice<T>* out, size_t of_value, Optim_Info const& optims) -> Slice<T>
+    proc factorial(Slice<T>* out, size_t of_value, Optims const& optims) -> Slice<T>
     {
-        assert(high_bits(cast(T) of_value) == 0 && "only 'small' factorials supported! with naive algorhitm");
+        assert(out->size >= required_factorial_size(of_value));
 
-        size_t highest_possible_native = 1;
         bool did_finish = true;
-        size_t factor = 2;
-        for(; factor <= of_value; factor++)
+        if(of_value < MAX_NATIVE_FACTORIAL)
         {
-            size_t next = highest_possible_native * factor;
-            if(next < highest_possible_native)
-            {
-                did_finish = false;
-                break;
-            }
-
-            highest_possible_native = next; 
+            size_t fact = single_factorial_fast(of_value);
+            return from_number(out, fact);
         }
 
+        constexpr size_t highest_possible_native = single_factorial(MAX_NATIVE_FACTORIAL);
         Slice<T> current_value = from_number(out, highest_possible_native);
-
-        if(did_finish)
-            return current_value;
-
-
-        for(; factor <= of_value; factor++)
+        for(size_t factor = MAX_NATIVE_FACTORIAL + 1; factor <= of_value; factor++)
             current_value = mul<T>(out, current_value, cast(T) factor, optims);
 
         return current_value;

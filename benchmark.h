@@ -34,14 +34,8 @@ namespace benchmark
     {
         i64 iters = 0;
         i64 time_ns = 0;
-    }
+    };
 
-    template <typename Fn>
-    func measure(i64 max_time_ms, Fn fn) noexcept -> Bench_Result
-    {
-        i64 max_time_ns = max_time_ms * 1'000'000;
-        return measure_ns(max_time_ns, max_time_ns / 10, fn);
-    }
 
     template <typename Fn>
     func measure_ns(i64 max_time_ns, i64 warm_up_ns, Fn fn, i64 base_block_size = 1, i64 num_checks = 5) noexcept -> Bench_Result
@@ -79,13 +73,19 @@ namespace benchmark
                 block_size = max(block_size, 1);
 
                 result.iters = 0; //discard so far
-                result.time = 0;
+                result.time_ns = 0;
                 to_time = max_time_ns;
-                stage = Benchmark_Stage::BLOCKED;
             }
         }
 
         return result;
+    }
+
+    template <typename Fn>
+    func measure(i64 max_time_ms, Fn fn) noexcept -> Bench_Result
+    {
+        i64 max_time_ns = max_time_ms * 1'000'000;
+        return measure_ns(max_time_ns, max_time_ns / 10, fn);
     }
 
     proc use_pointer(char const volatile*) {}
