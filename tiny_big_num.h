@@ -308,7 +308,7 @@ namespace helpers
         //   n*log(r) = log(x)
         // factoring r gives:
         //   r = e^(log(x) / n)
-        //   r = 2^(log2(x) / 2)
+        //   r = 2^(log2(x) / n)
 
         // we want to find an initial estimate above such r so we need to increase the expression:
         //  we will perform this by parts:

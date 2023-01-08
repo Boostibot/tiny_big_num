@@ -1683,7 +1683,6 @@ namespace tiny_num_test
     {
         std::cout << "TESTING: " << type_name << std::endl;
 
-
         std::cout << "add...        ";
         test_add_overflow<T>(generator, random_runs);
         std::cout << "ok" << std::endl;
