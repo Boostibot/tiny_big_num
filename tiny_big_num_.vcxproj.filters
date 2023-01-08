@@ -41,5 +41,8 @@
     <ClInclude Include="pod_vector.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="temp.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
 </Project>

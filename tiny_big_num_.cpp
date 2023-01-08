@@ -2,6 +2,14 @@
 #include <string>
 
 #include "tests.h"
+
+int main()
+{
+    tiny_num_test::run_tests();
+}
+
+/*
+#include "tests.h"
 #include "interpret.h"
 
 int main()
@@ -76,3 +84,4 @@ int main()
     }
 
 }
+*/

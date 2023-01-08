@@ -135,6 +135,7 @@
     <ClInclude Include="benchmark.h" />
     <ClInclude Include="big_int.h" />
     <ClInclude Include="interpret.h" />
+    <ClInclude Include="temp.h" />
     <ClInclude Include="pod_vector.h" />
     <ClInclude Include="tests.h" />
     <ClInclude Include="tiny_big_num.h" />

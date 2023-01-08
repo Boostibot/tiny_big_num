@@ -17,6 +17,24 @@
 
 #include "pod_vector.h"
 #include "benchmark.h"
+
+#define TINY_NUM_TYPE_1 uint8_t
+#define TINY_NUM_LIB_NAME tiny_num_u8
+#include "tiny_big_num.h"
+
+#define TINY_NUM_TYPE_2 uint16_t
+#undef TINY_NUM_LIB_NAME
+#define TINY_NUM_LIB_NAME tiny_num_u16
+#include "tiny_big_num.h"
+
+#define TINY_NUM_TYPE_3 uint32_t
+#undef TINY_NUM_LIB_NAME
+#define TINY_NUM_LIB_NAME tiny_num_u32
+#include "tiny_big_num.h"
+
+#define TINY_NUM_TYPE_4 uint64_t
+#undef TINY_NUM_LIB_NAME
+#define TINY_NUM_LIB_NAME tiny_num_u64
 #include "tiny_big_num.h"
 
 #define let const auto
@@ -28,22 +46,32 @@
 
 #define cast(...) (__VA_ARGS__)
 
-namespace tiny_num::test
+namespace tiny_num_test
 {
-    using u8 = std::uint8_t;
-    using u16 = std::uint16_t;
-    using u32 = std::uint32_t;
-    using u64 = std::uint64_t;
+    using namespace helpers;
 
-    using i8 = std::int8_t;
-    using i16 = std::int16_t;
-    using i32 = std::int32_t;
-    using i64 = std::int64_t;
+    namespace tiny_num
+    {
+        using namespace tiny_num_u8;
+        using namespace tiny_num_u16;
+        using namespace tiny_num_u32;
+        using namespace tiny_num_u64;
+    };
+
+    using u8 = uint8_t;
+    using u16 = uint16_t;
+    using u32 = uint32_t;
+    using u64 = uint64_t;
+
+    using i8 = int8_t;
+    using i16 = int16_t;
+    using i32 = int32_t;
+    using i64 = int64_t;
 
     using b8 = bool;
-    using b16 = std::uint16_t;
-    using b32 = std::uint32_t;
-    using b64 = std::uint64_t;
+    using b16 = uint16_t;
+    using b32 = uint32_t;
+    using b64 = uint64_t;
 
     using f32 = float;
     using f64 = double;
@@ -53,6 +81,9 @@ namespace tiny_num::test
     using usize = size_t;
 
     using umax = u64;
+
+    template <typename T>
+    constexpr size_t BIT_SIZE = sizeof(T) * CHAR_BIT;
 
     using std::move;
     using std::size;
@@ -84,6 +115,15 @@ namespace tiny_num::test
         return Slice<const T>{data(vec), cast(usize) size(vec)};
     }
 
+    func slice(cstring str) -> Slice<const char>
+    {
+        size_t size = 0;
+        while(str[size] != '\0')
+            size ++;
+        
+        return Slice<const char>{str, size};
+    }
+
     template<typename T>
     func slice(POD_Vector<T>* vec) -> Slice<T>
     {
@@ -95,7 +135,7 @@ namespace tiny_num::test
     {
         mut vec = make_sized_vector<T>(items.size);
         mut vec_slice = slice(&vec);
-        copy_slice<T>(&vec_slice, items, Iter_Direction::NO_ALIAS);
+        tiny_num::copy_slice(&vec_slice, items);
 
         return vec;
     }
@@ -103,10 +143,10 @@ namespace tiny_num::test
     template<typename T>
     func make_vector_of_digits(umax val) -> POD_Vector<T>
     {
-        constexpr size_t count = digits_to_represent<T, umax>();
+        constexpr size_t count = MAX_TYPE_SIZE_FRACTION<T>;
         POD_Vector<T> vec = make_sized_vector<T>(count);
         Slice<T> digits = slice(&vec);
-        Slice<T> converted_slice = from_number<T>(&digits, val);
+        Slice<T> converted_slice = tiny_num::from_number(&digits, val);
         resize(&vec, converted_slice.size);
         return vec;
     }
@@ -123,7 +163,7 @@ namespace tiny_num::test
     template <typename T>
     func make_padded_vector_of_digits(umax val, size_t pref_size = 1, size_t post_size = 1) -> Padded_POD_Vector<T>
     {
-        constexpr size_t count = digits_to_represent<T, umax>();
+        constexpr size_t count = MAX_TYPE_SIZE_FRACTION<T>;
         size_t total_size = pref_size + count + post_size;
 
         Padded_POD_Vector<T> padded;
@@ -131,7 +171,7 @@ namespace tiny_num::test
         padded.vector = make_sized_vector<T>(total_size);
         Slice<T> whole = slice(&padded.vector);
         Slice<T> digits = slice_size(whole, pref_size, count);
-        Slice<T> content = from_number<T>(&digits, val);
+        Slice<T> content = tiny_num::from_number(&digits, val);
 
         padded.prefix_size = pref_size;
         padded.content_size = content.size;
@@ -240,159 +280,154 @@ namespace tiny_num::test
         return optims;
     }
 
-
-
-    
-
     runtime_proc test_misc(Random_Generator* generator, size_t random_runs)
     {
-        using umax = umax;
+        {
+            using namespace tiny_num_u64;
 
-        assert(find_last_set_bit<umax>(0) == 0);
-        assert(find_last_set_bit<umax>(1) == 0);
-        assert(find_last_set_bit<umax>(2) == 1);
-        assert(find_last_set_bit<umax>(3) == 1);
-        assert(find_last_set_bit<umax>(4) == 2);
-        assert(find_last_set_bit<umax>(7) == 2);
-        assert(find_last_set_bit<umax>(8) == 3);
-        assert(find_last_set_bit<umax>(76) == 6);
-        assert(find_last_set_bit<umax>(513) == 9);
-        assert(find_last_set_bit<umax>(641) == 9);
-        assert(find_last_set_bit<umax>(1024) == 10);
-        assert(find_last_set_bit<u64>(0xf4f1f63db9b7e800) == 63);
-        assert(find_last_set_bit<umax>(0b010100) == 4);
-        assert(find_last_set_bit<umax>(0b010000) == 4);
+            assert(find_last_set_bit(0) == 0);
+            assert(find_last_set_bit(1) == 0);
+            assert(find_last_set_bit(2) == 1);
+            assert(find_last_set_bit(3) == 1);
+            assert(find_last_set_bit(4) == 2);
+            assert(find_last_set_bit(7) == 2);
+            assert(find_last_set_bit(8) == 3);
+            assert(find_last_set_bit(76) == 6);
+            assert(find_last_set_bit(513) == 9);
+            assert(find_last_set_bit(641) == 9);
+            assert(find_last_set_bit(1024) == 10);
+            assert(find_last_set_bit(0xf4f1f63db9b7e800) == 63);
+            assert(find_last_set_bit(0b010100) == 4);
+            assert(find_last_set_bit(0b010000) == 4);
 
-        assert(find_first_set_bit<umax>(0) == 0);
-        assert(find_first_set_bit<umax>(0b000001) == 0);
-        assert(find_first_set_bit<umax>(0b010100) == 2);
-        assert(find_first_set_bit<umax>(0b010101) == 0);
-        assert(find_first_set_bit<umax>(0b010000) == 4);
-        assert(find_first_set_bit<umax>(0b010100) == 2);
-        assert(find_first_set_bit<umax>(0b010010) == 1);
+            assert(find_first_set_bit(0) == 0);
+            assert(find_first_set_bit(0b000001) == 0);
+            assert(find_first_set_bit(0b010100) == 2);
+            assert(find_first_set_bit(0b010101) == 0);
+            assert(find_first_set_bit(0b010000) == 4);
+            assert(find_first_set_bit(0b010100) == 2);
+            assert(find_first_set_bit(0b010010) == 1);
+        
+            assert(pop_count(0b0000'0000) == 0);
+            assert(pop_count(0b0000'0001) == 1);
+            assert(pop_count(0b1000'0000) == 1);
+            assert(pop_count(0b1010'0000) == 2);
+            assert(pop_count(0b1010'0011) == 4);
+            assert(pop_count(0b0111'1111) == 7);
+            assert(pop_count(cast(u32) -1) == 32);
+            assert(pop_count(cast(umax) -1) == 64);
 
-        assert(pop_count<umax>(0b0000'0000) == 0);
-        assert(pop_count<umax>(0b0000'0001) == 1);
-        assert(pop_count<umax>(0b1000'0000) == 1);
-        assert(pop_count<umax>(0b1010'0000) == 2);
-        assert(pop_count<umax>(0b1010'0011) == 4);
-        assert(pop_count<umax>(0b0111'1111) == 7);
-        assert(pop_count<umax>(cast(u32) -1) == 32);
-        assert(pop_count<umax>(cast(umax) -1) == 64);
+            assert(set_bit(0b0001001, 1, 1) == 0b0001011);
+            assert(set_bit(0b0001001, 0, 1) == 0b0001001);
+            assert(set_bit(0b0001001, 0, 0) == 0b0001000);
+            assert(set_bit(0b0001001, 3, 0) == 0b0000001);
+            assert(get_bit(0b0001001, 0) == 1);
+            assert(get_bit(0b0001001, 1) == 0);
+            assert(get_bit(0b0001001, 2) == 0);
+            assert(get_bit(0b0001001, 3) == 1);
 
-        assert(high_mask<u8>() == 0xF0);
-        assert(high_mask<u8>(2) == 0b1111'1100);
-        assert(high_mask<u8>(5) == 0b1110'0000);
-        assert(high_mask<u16>() == 0xFF00);
-        assert(high_mask<u32>() == 0xFFFF0000);
-        assert(high_mask<u64>() == 0xFFFFFFFF00000000);
+            assert(single_pow_by_squaring(3,3) == 27);
 
-        assert(low_mask<u8>() == 0x0F);
-        assert(low_mask<u8>(2) == 0b0000'0011);
-        assert(low_mask<u8>(5) == 0b0001'1111);
-        assert(low_mask<u16>() == 0x00FF);
-        assert(low_mask<u32>() == 0x0000FFFF);
-        assert(low_mask<u64>() == 0x00000000FFFFFFFF);
+            assert(single_root_shifting(8, 3) == 2);
+            assert(single_root_shifting(9, 3) == 2);
+            assert(single_root_shifting(27, 3) == 3);
+            assert(single_root_shifting(28, 3) == 3);
+            assert(single_root_shifting(29, 3) == 3);
+            assert(single_root_shifting(34, 5) == 2);
+            assert(single_root_shifting(15625, 3) == 25);
+            assert(single_root_shifting(0, 0) == 1);
+            assert(single_root_shifting(1, 0) == 1);
+            assert(single_root_shifting(4096, 6) == 4);
+            assert(single_root_shifting(18446744073709551614, 17ull) == 13);
 
-        assert(low_bits<u32>(0b1010'1100'0001, 1) == 1);
-        assert(low_bits<u32>(0b1010'1100'0001, 2) == 1);
-        assert(low_bits<u32>(0b1010'1100'0001, 4) == 1);
-        assert(low_bits<u32>(0b1010'1100'0001, 6) == 1);
-        assert(low_bits<u32>(0b1010'1100'0001, 8) == 0b1100'0001);
-        assert(low_bits<u32>(1, 16) == 1);
-        assert(low_bits<u32>(1, 7) == 1);
-        assert(low_bits<u32>(1, 8) == 1);
+            assert(single_root_newton(8, 3) == 2);
+            assert(single_root_newton(9, 3) == 2);
+            assert(single_root_newton(27, 3) == 3);
+            assert(single_root_newton(28, 3) == 3);
+            assert(single_root_newton(29, 3) == 3);
+            assert(single_root_newton(34, 5) == 2);
+            assert(single_root_newton(15625, 3) == 25);
+            assert(single_root_newton(0, 0) == 1);
+            assert(single_root_newton(1, 0) == 1);
+            assert(single_root_newton(4096, 6) == 4);
 
+            assert(single_log_heyley(25, 2) == 4);
+            assert(single_log_heyley(255, 2) == 7);
+            assert(single_log_heyley(256, 2) == 8);
+            assert(single_log_heyley(4, 4) == 1);
+            assert(single_log_heyley(9, 3) == 2);
+            assert(single_log_heyley(26, 3) == 2);
+            assert(single_log_heyley(27, 3) == 3);
+            assert(single_log_heyley(64, 3) == 3);
+            assert(single_log_heyley(81, 3) == 4);
+            assert(single_log_heyley(16, 4) == 2);
+            assert(single_log_heyley(17, 4) == 2);
+            assert(single_log_heyley(27, 4) == 2);
+            assert(single_log_heyley(63, 4) == 2);
+            assert(single_log_heyley(64, 4) == 3);
 
-        assert(set_bit(0b0001001, 1, 1) == 0b0001011);
-        assert(set_bit(0b0001001, 0, 1) == 0b0001001);
-        assert(set_bit(0b0001001, 0, 0) == 0b0001000);
-        assert(set_bit(0b0001001, 3, 0) == 0b0000001);
-        assert(get_bit(0b0001001, 0) == 1);
-        assert(get_bit(0b0001001, 1) == 0);
-        assert(get_bit(0b0001001, 2) == 0);
-        assert(get_bit(0b0001001, 3) == 1);
+            assert(single_log_bsearch(25, 2) == 4);
+            assert(single_log_bsearch(255, 2) == 7);
+            assert(single_log_bsearch(256, 2) == 8);
+            assert(single_log_bsearch(4, 4) == 1);
+            assert(single_log_bsearch(9, 3) == 2);
+            assert(single_log_bsearch(26, 3) == 2);
+            assert(single_log_bsearch(27, 3) == 3);
+            assert(single_log_bsearch(64, 3) == 3);
+            assert(single_log_bsearch(81, 3) == 4);
+            assert(single_log_bsearch(16, 4) == 2);
+            assert(single_log_bsearch(17, 4) == 2);
+            assert(single_log_bsearch(27, 4) == 2);
+            assert(single_log_bsearch(63, 4) == 2);
+            assert(single_log_bsearch(64, 4) == 3);
 
+            assert((highest_power_of_in_bits(2, 2) == Power_And_Powed{1, 2}));
+            assert((highest_power_of_in_bits(1, 2) == Power_And_Powed{0, 1}));
+            assert((highest_power_of_in_bits(16, 2) == Power_And_Powed{15, 1 << 15}));
+            assert((highest_power_of_in_bits(8, 3) == Power_And_Powed{5, 243}));
 
-        assert(single_pow_by_squaring(3,3) == 27);
+            assert((highest_power_of_in_bits(0, 10) == Power_And_Powed{0, 1}));
+            assert((highest_power_of_in_bits(1, 10) == Power_And_Powed{0, 1}));
+            assert((highest_power_of_in_bits(2, 10) == Power_And_Powed{0, 1}));
+            assert((highest_power_of_in_bits(4, 10) == Power_And_Powed{1, 10}));
+            assert((highest_power_of_in_bits(8, 10) == Power_And_Powed{2, 100}));
+            assert((highest_power_of_in_bits(16, 10) == Power_And_Powed{4, 10'000}));
+            assert((highest_power_of_in_bits(32, 10) == Power_And_Powed{9, 1'000'000'000}));
+            assert((highest_power_of_in_bits(33, 10) == Power_And_Powed{9, 1'000'000'000}));
+            assert((highest_power_of_in_bits(34, 10) == Power_And_Powed{10, 10'000'000'000}));
+            assert((highest_power_of_in_bits(64, 10) == Power_And_Powed{19, 10'000'000'000'000'000'000}));
 
-        assert(single_root_shifting(8, 3) == 2);
-        assert(single_root_shifting(9, 3) == 2);
-        assert(single_root_shifting(27, 3) == 3);
-        assert(single_root_shifting(28, 3) == 3);
-        assert(single_root_shifting(29, 3) == 3);
-        assert(single_root_shifting(34, 5) == 2);
-        assert(single_root_shifting(15625, 3) == 25);
-        assert(single_root_shifting(0, 0) == 1);
-        assert(single_root_shifting(1, 0) == 1);
-        assert(single_root_shifting(4096, 6) == 4);
-        assert(single_root_shifting(18446744073709551614, 17ull) == 13);
+        }
 
-        assert(single_root_newton(8, 3) == 2);
-        assert(single_root_newton(9, 3) == 2);
-        assert(single_root_newton(27, 3) == 3);
-        assert(single_root_newton(28, 3) == 3);
-        assert(single_root_newton(29, 3) == 3);
-        assert(single_root_newton(34, 5) == 2);
-        assert(single_root_newton(15625, 3) == 25);
-        assert(single_root_newton(0, 0) == 1);
-        assert(single_root_newton(1, 0) == 1);
-        assert(single_root_newton(4096, 6) == 4);
+        assert(tiny_num_u8::high_mask() == 0xF0);
+        assert(tiny_num_u8::high_mask(2) == 0b1111'1100);
+        assert(tiny_num_u8::high_mask(5) == 0b1110'0000);
+        assert(tiny_num_u16::high_mask() == 0xFF00);
+        assert(tiny_num_u32::high_mask() == 0xFFFF0000);
+        assert(tiny_num_u64::high_mask() == 0xFFFFFFFF00000000);
 
+        assert(tiny_num_u8::low_mask() == 0x0F);
+        assert(tiny_num_u8::low_mask(2) == 0b0000'0011);
+        assert(tiny_num_u8::low_mask(5) == 0b0001'1111);
+        assert(tiny_num_u16::low_mask() == 0x00FF);
+        assert(tiny_num_u32::low_mask() == 0x0000FFFF);
+        assert(tiny_num_u64::low_mask() == 0x00000000FFFFFFFF);
 
-        assert(single_log_heyley(25, 2) == 4);
-        assert(single_log_heyley(255, 2) == 7);
-        assert(single_log_heyley(256, 2) == 8);
-        assert(single_log_heyley(4, 4) == 1);
-        assert(single_log_heyley(9, 3) == 2);
-        assert(single_log_heyley(26, 3) == 2);
-        assert(single_log_heyley(27, 3) == 3);
-        assert(single_log_heyley(64, 3) == 3);
-        assert(single_log_heyley(81, 3) == 4);
-        assert(single_log_heyley(16, 4) == 2);
-        assert(single_log_heyley(17, 4) == 2);
-        assert(single_log_heyley(27, 4) == 2);
-        assert(single_log_heyley(63, 4) == 2);
-        assert(single_log_heyley(64, 4) == 3);
-
-
-        assert(single_log_bsearch(25, 2) == 4);
-        assert(single_log_bsearch(255, 2) == 7);
-        assert(single_log_bsearch(256, 2) == 8);
-        assert(single_log_bsearch(4, 4) == 1);
-        assert(single_log_bsearch(9, 3) == 2);
-        assert(single_log_bsearch(26, 3) == 2);
-        assert(single_log_bsearch(27, 3) == 3);
-        assert(single_log_bsearch(64, 3) == 3);
-        assert(single_log_bsearch(81, 3) == 4);
-        assert(single_log_bsearch(16, 4) == 2);
-        assert(single_log_bsearch(17, 4) == 2);
-        assert(single_log_bsearch(27, 4) == 2);
-        assert(single_log_bsearch(63, 4) == 2);
-        assert(single_log_bsearch(64, 4) == 3);
-
-        assert((highest_power_of_in_type(2, 2) == Power_And_Powed{1, 2}));
-        assert((highest_power_of_in_type(1, 2) == Power_And_Powed{0, 1}));
-        assert((highest_power_of_in_type(16, 2) == Power_And_Powed{15, 1 << 15}));
-        assert((highest_power_of_in_type(8, 3) == Power_And_Powed{5, 243}));
-
-        assert((highest_power_of_in_type(0, 10) == Power_And_Powed{0, 1}));
-        assert((highest_power_of_in_type(1, 10) == Power_And_Powed{0, 1}));
-        assert((highest_power_of_in_type(2, 10) == Power_And_Powed{0, 1}));
-        assert((highest_power_of_in_type(4, 10) == Power_And_Powed{1, 10}));
-        assert((highest_power_of_in_type(8, 10) == Power_And_Powed{2, 100}));
-        assert((highest_power_of_in_type(16, 10) == Power_And_Powed{4, 10'000}));
-        assert((highest_power_of_in_type(32, 10) == Power_And_Powed{9, 1'000'000'000}));
-        assert((highest_power_of_in_type(33, 10) == Power_And_Powed{9, 1'000'000'000}));
-        assert((highest_power_of_in_type(34, 10) == Power_And_Powed{10, 10'000'000'000}));
-        assert((highest_power_of_in_type(64, 10) == Power_And_Powed{19, 10'000'000'000'000'000'000}));
+        assert(tiny_num_u32::low_bits(0b1010'1100'0001, 1) == 1);
+        assert(tiny_num_u32::low_bits(0b1010'1100'0001, 2) == 1);
+        assert(tiny_num_u32::low_bits(0b1010'1100'0001, 4) == 1);
+        assert(tiny_num_u32::low_bits(0b1010'1100'0001, 6) == 1);
+        assert(tiny_num_u32::low_bits(0b1010'1100'0001, 8) == 0b1100'0001);
+        assert(tiny_num_u32::low_bits(1, 16) == 1);
+        assert(tiny_num_u32::low_bits(1, 7) == 1);
+        assert(tiny_num_u32::low_bits(1, 8) == 1);
 
         constexpr u64 max = std::numeric_limits<u64>::max()/2;
         constexpr u64 min = 2;
         let val_dist = make_exponential_distribution<u64>(min, max);
 
         assert(cast(u64) 1 << 42 == 4398046511104);
-        assert(single_log_heyley(4398046511104ull, 2ull) == 42);
+        assert(tiny_num_u64::single_log_heyley(4398046511104ull, 2ull) == 42);
 
         for(size_t i = 0; i < random_runs; i++)
         {
@@ -400,20 +435,20 @@ namespace tiny_num::test
             let power_dist = make_exponential_distribution<u64>(min, val);
             u64 power = cast(u64) power_dist(*generator);
 
-            u64 rooted = single_root_shifting(val, power);
-            u64 powed_low = single_pow_by_squaring(rooted, power);
-            u64 back_down = single_root_shifting(powed_low, power);
+            u64 rooted = tiny_num_u64::single_root_shifting(val, power);
+            u64 powed_low = tiny_num_u64::single_pow_by_squaring(rooted, power);
+            u64 back_down = tiny_num_u64::single_root_shifting(powed_low, power);
             if(rooted > 1 && powed_low < 43980465111) //so that no overflow
             {
-                u64 loged_heyley = single_log_heyley(powed_low, rooted);
-                u64 loged_bsearch = single_log_heyley(powed_low, rooted);
+                u64 loged_heyley = tiny_num_u64::single_log_heyley(powed_low, rooted);
+                u64 loged_bsearch = tiny_num_u64::single_log_heyley(powed_low, rooted);
                 assert(loged_heyley == power);
                 assert(loged_bsearch == power);
             }
 
             if(power < 100)
             {
-                u64 ref_powed_low = single_pow_trivial(rooted, power);
+                u64 ref_powed_low = tiny_num_u64::single_pow_trivial(rooted, power);
                 assert(ref_powed_low == powed_low);
             }
             else
@@ -434,8 +469,8 @@ namespace tiny_num::test
             assert(back_down == rooted);
 
 
-            u64 rooted_again = single_root_shifting(rooted, power);
-            u64 rooted_again_newton = single_root_newton(rooted, power);
+            u64 rooted_again = tiny_num_u64::single_root_shifting(rooted, power);
+            u64 rooted_again_newton = tiny_num_u64::single_root_newton(rooted, power);
 
             assert(rooted_again == rooted_again_newton);
         }
@@ -445,11 +480,12 @@ namespace tiny_num::test
     runtime_proc test_add_overflow(Random_Generator* generator, size_t random_runs)
     {
         using Res = Batch_Op_Result;
-        using umax = umax;
         using POD_Vector = POD_Vector<T>;
         using Padded = Padded_POD_Vector<T>;
         using CSlice = Slice<const T>;
         using Slice = Slice<T>;
+
+        using namespace tiny_num;
 
         runtime_proc test_add_overflow_batch = [&](umax left_, umax right_, umax carry_in, Res expected, bool check_overflow = true) -> bool {
             POD_Vector left = make_vector_of_digits<T>(left_);
@@ -465,9 +501,9 @@ namespace tiny_num::test
 
             let loc = Location::OUT_OF_PLACE;
 
-            let res1 = batch_add_overflow_long<T>(&out_s,  slice(left), slice(right), loc, cast(T) carry_in);
-            let res2 = batch_add_overflow_long<T>(&pad_left_s, content(pad_left), slice(right), loc, cast(T) carry_in); //test self assign
-            let res3 = batch_add_overflow_long<T>(&pad_right_s, slice(left), content(pad_right), loc, cast(T) carry_in); 
+            let res1 = batch_add_overflow_long(&out_s,  slice(left), slice(right), loc, cast(T) carry_in);
+            let res2 = batch_add_overflow_long(&pad_left_s, content(pad_left), slice(right), loc, cast(T) carry_in); //test self assign
+            let res3 = batch_add_overflow_long(&pad_right_s, slice(left), content(pad_right), loc, cast(T) carry_in); 
 
             Slice res1_s = res1.slice;
             Slice res2_s = res2.slice;
@@ -535,10 +571,10 @@ namespace tiny_num::test
             Slice left1_s = slice(&left1);
             Slice left2_s = slice(&left2);
 
-            let res2 = batch_add_overflow_short<T>(&left1_s, left1_s, adjusted_single, Location::IN_PLACE);
-            let res1 = batch_add_overflow_long<T>(&left2_s, left2_s, Slice{&adjusted_single, 1}, Location::IN_PLACE);
+            let res2 = batch_add_overflow_short(&left1_s, left1_s, adjusted_single, Location::IN_PLACE);
+            let res1 = batch_add_overflow_long(&left2_s, left2_s, Slice{&adjusted_single, 1}, Location::IN_PLACE);
 
-            bool slices = is_equal<T>(res1.slice, res2.slice);
+            bool slices = is_equal(res1.slice, res2.slice);
             bool overflows = res1.overflow == res2.overflow;
             return slices && overflows;
         };
@@ -590,11 +626,12 @@ namespace tiny_num::test
     runtime_proc test_sub_overflow(Random_Generator* generator, size_t random_runs)
     {
         using Res = Batch_Op_Result;
-        using umax = umax;
         using POD_Vector = POD_Vector<T>;
         using Padded = Padded_POD_Vector<T>;
         using CSlice = Slice<const T>;
         using Slice = Slice<T>;
+
+        using namespace tiny_num;
 
         runtime_proc test_sub_overflow_batch = [&](umax left_, umax right_, umax carry_in, Res expected, bool check_overflow = true) -> bool {
             POD_Vector left = make_vector_of_digits<T>(left_);
@@ -609,8 +646,8 @@ namespace tiny_num::test
 
             let loc = Location::OUT_OF_PLACE;
 
-            let res1 = batch_sub_overflow_long<T>(&out_s,  slice(left), slice(right), loc, cast(T) carry_in);
-            let res2 = batch_sub_overflow_long<T>(&pad_left_s, content(pad_left), slice(right), loc, cast(T) carry_in); //test self assign
+            let res1 = batch_sub_overflow_long(&out_s,  slice(left), slice(right), loc, cast(T) carry_in);
+            let res2 = batch_sub_overflow_long(&pad_left_s, content(pad_left), slice(right), loc, cast(T) carry_in); //test self assign
 
             Slice res1_s = res1.slice;
             Slice res2_s = res2.slice;
@@ -637,7 +674,7 @@ namespace tiny_num::test
 
             umax highest_one = cast(umax) 1 << (BIT_SIZE<umax> - 1);
             umax adjusted_right = right & ~highest_one;
-            umax adjusted_carry = carry_in > low_mask<umax>();
+            umax adjusted_carry = carry_in > tiny_num_u64::low_mask();
 
             umax adjusted_left = left;
             if(left < adjusted_carry + adjusted_right)
@@ -692,11 +729,12 @@ namespace tiny_num::test
     runtime_proc test_complement_overflow(Random_Generator* generator, size_t random_runs)
     {
         using Res = Batch_Op_Result;
-        using umax = umax;
         using POD_Vector = POD_Vector<T>;
         using Padded = Padded_POD_Vector<T>;
         using CSlice = Slice<const T>;
         using Slice = Slice<T>;
+
+        using namespace tiny_num;
 
         //we dont test oveflow of this op 
         runtime_proc batch_complement_overflow = [&](umax left_, umax carry_in = 1) -> umax{
@@ -709,8 +747,8 @@ namespace tiny_num::test
 
             let loc = Location::OUT_OF_PLACE;
 
-            let res1 = tiny_num::batch_complement_overflow<T>(&out_s, left_s, cast(T) carry_in);
-            let res2 = tiny_num::batch_complement_overflow<T>(&pad_left_s, left_s, cast(T) carry_in); //test self assign
+            let res1 = tiny_num::batch_complement_overflow(&out_s, left_s, cast(T) carry_in);
+            let res2 = tiny_num::batch_complement_overflow(&pad_left_s, left_s, cast(T) carry_in); //test self assign
 
             let num1 = to_number(res1.slice);
             let num2 = to_number(res2.slice);
@@ -770,13 +808,14 @@ namespace tiny_num::test
     runtime_proc test_shift_overflow(Random_Generator* generator, size_t random_runs)
     {
         using Res = Batch_Op_Result;
-        using umax = umax;
         using POD_Vector = POD_Vector<T>;
         using Padded = Padded_POD_Vector<T>;
         using CSlice = Slice<const T>;
         using Slice = Slice<T>;
 
-        runtime_proc shift_both = [&](umax left_, umax right, umax carry_in, bool up_down, Iter_Direction direction) -> Batch_Op_Result{
+        using namespace tiny_num;
+
+        runtime_proc shift_both = [&](umax left_, umax right, umax carry_in, bool is_shift_up, Iter_Direction direction) -> Batch_Op_Result{
             Padded pad_left = make_padded_vector_of_digits<T>(left_, 1);
             POD_Vector out = make_sized_vector<T>(MAX_TYPE_SIZE_FRACTION<T> + 1);
 
@@ -790,19 +829,12 @@ namespace tiny_num::test
             else
                 pad_left_s = slice(whole, 1);
 
-            Batch_Overflow<T> res1;
-            Batch_Overflow<T> res2;
-
-            if(up_down)
-            {
-                res1 = batch_shift_up_overflow<T>(&out_s, left_s, right, direction, cast(T) carry_in);
-                res2 = batch_shift_up_overflow<T>(&pad_left_s, left_s, right, direction, cast(T) carry_in);
-            }
-            else
-            {
-                res1 = batch_shift_down_overflow<T>(&out_s, left_s, right, direction, cast(T) carry_in);
-                res2 = batch_shift_down_overflow<T>(&pad_left_s, left_s, right, direction, cast(T) carry_in);
-            }
+            let res1 = (is_shift_up) 
+                ? batch_shift_up_overflow(&out_s, left_s, right, direction, cast(T) carry_in)
+                : batch_shift_down_overflow(&out_s, left_s, right, direction, cast(T) carry_in);
+            let res2 = (is_shift_up) 
+                ? batch_shift_up_overflow(&pad_left_s, left_s, right, direction, cast(T) carry_in)
+                : batch_shift_down_overflow(&pad_left_s, left_s, right, direction, cast(T) carry_in);
 
             let num1 = to_number(res1.slice);
             let num2 = to_number(res2.slice);
@@ -879,14 +911,14 @@ namespace tiny_num::test
 
     runtime_func adjust_to_not_mul_overflow(umax left, umax right) -> Adjusted
     {
-        using umax = umax;
+        using namespace tiny_num_u64;
         // (by doing find_last_set_bit) and then shifting it so that they will not overflow
 
         umax adjusted_left = left;
         umax adjusted_right = right;
 
-        size_t log_left = find_last_set_bit(left) + 1; 
-        size_t log_right = find_last_set_bit(right) + 1; 
+        size_t log_left = log2(left) + 1; 
+        size_t log_right = log2(right) + 1; 
         //find_last_set_bit returns position of highest set bit but we want "under which power of two is the whole number" 
         // => we add 1
 
@@ -902,7 +934,7 @@ namespace tiny_num::test
             adjusted_right >>= shift;
         }
 
-        assert(find_last_set_bit(adjusted_left) + find_last_set_bit(adjusted_right) + 2 <= BIT_SIZE<umax>);
+        assert(log2(adjusted_left) + log2(adjusted_right) + 2 <= BIT_SIZE<umax>);
         return {adjusted_left, adjusted_right};
     }
 
@@ -910,11 +942,12 @@ namespace tiny_num::test
     runtime_proc test_mul_overflow(Random_Generator* generator, size_t random_runs, size_t controlled_runs)
     {
         using Res = Batch_Op_Result;
-        using umax = umax;
         using POD_Vector = POD_Vector<T>;
         using Padded = Padded_POD_Vector<T>;
         using CSlice = Slice<const T>;
         using Slice = Slice<T>;
+
+        using namespace tiny_num;
 
         runtime_proc test_mul_overflow_batch = [&](umax left_, umax right, umax carry_in, Res expected, Optims optims, bool check_overflow = true) -> bool {
             Padded pad_left = make_padded_vector_of_digits<T>(left_, 1);
@@ -924,8 +957,8 @@ namespace tiny_num::test
             Slice out_s = slice<T>(&out);
             Slice pad_left_s = slice<T>(&pad_left.vector);
 
-            let res1 = batch_mul_overflow<T>(&out_s, left_s, cast(T) right, optims, cast(T) carry_in);
-            let res2 = batch_mul_overflow<T>(&pad_left_s, left_s, cast(T) right, optims, cast(T) carry_in);
+            let res1 = batch_mul_overflow(&out_s, left_s, cast(T) right, optims, cast(T) carry_in);
+            let res2 = batch_mul_overflow(&pad_left_s, left_s, cast(T) right, optims, cast(T) carry_in);
 
             Slice res1_s = res1.slice;
             Slice res2_s = res2.slice;
@@ -976,7 +1009,6 @@ namespace tiny_num::test
                 assert(test_mul_overflow_batch(25, 5, 0, Res{125, 0}, optims));
                 assert(test_mul_overflow_batch(0xFF, 0x10, 0, Res{0xF0, 0xF}, optims));
 
-                assert((single_mul_overflow<T>(0xFF, 0x10, 0xC) == Single_Overflow<T>{0xFC, 0xF}));
                 assert(test_mul_overflow_batch(0xFFEE, 0x80, 0, Res{0xF700, 0x7F}, optims));
                 assert(test_mul_overflow_batch(0xFFEE, 0x80, 0, Res{0xF700, 0x7F}, optims));
                 assert(test_mul_overflow_batch(0xA1, 0x11, 0, Res{0xB1, 0xA}, optims));
@@ -990,7 +1022,7 @@ namespace tiny_num::test
         assert(auto_test_mul(0x14156f, 0x3c, Optims{}));
 
         let exponential = make_exponential_distribution<T, umax>();
-        let uniform = std::uniform_int_distribution<long long>(0, FULL_MASK<T> >> 1);
+        let uniform = std::uniform_int_distribution<long long>(0, T(-1) >> 1);
         for(size_t i = 0; i < random_runs; i++)
         {
             umax left = exponential(*generator);
@@ -1004,13 +1036,14 @@ namespace tiny_num::test
     runtime_proc test_div_overflow(Random_Generator* generator, size_t random_runs, size_t controlled_runs)
     {
         using Res = Batch_Op_Result;
-        using umax = umax;
         using POD_Vector = POD_Vector<T>;
         using Padded = Padded_POD_Vector<T>;
         using CSlice = Slice<const T>;
         using Slice = Slice<T>;
 
-        assert((single_div_overflow<T>(0x12, 0x0A, 0) == Single_Overflow<T>{1, 0x08}));
+        //assert((single_div_overflow(cast(T) 0x12, 0x0A, 0) == Single_Overflow{1, 0x08}));
+
+        using namespace tiny_num;
 
         runtime_proc test_div_overflow_batch = [&](umax left_, umax right, umax carry_in, Res expected, Optims optims) -> bool {
             constexpr size_t padding_before = 2;
@@ -1022,8 +1055,8 @@ namespace tiny_num::test
             Slice out_s = slice<T>(&out);
             Slice pad_left_s = slice(slice<T>(&pad_left.vector), 1);
 
-            let res1 = batch_div_overflow<T>(&out_s, left_s, cast(T) right, optims, cast(T) carry_in);
-            let res2 = batch_div_overflow<T>(&pad_left_s, left_s, cast(T) right, optims, cast(T) carry_in);
+            let res1 = batch_div_overflow(&out_s, left_s, cast(T) right, optims, cast(T) carry_in);
+            let res2 = batch_div_overflow(&pad_left_s, left_s, cast(T) right, optims, cast(T) carry_in);
 
             let num1 = to_number(res1.slice);
             let num2 = to_number(res2.slice);
@@ -1045,7 +1078,7 @@ namespace tiny_num::test
             if(right == 0)
                 return true;
         
-            umax adjusted_right = low_bits(cast(T) right);
+            umax adjusted_right = tiny_num_u64::low_bits(cast(T) right);
             umax res = left / adjusted_right;
             umax rem = left % adjusted_right;
 
@@ -1085,7 +1118,7 @@ namespace tiny_num::test
         }
 
         let exponential = make_exponential_distribution<T, umax>();
-        let uniform = std::uniform_int_distribution<long long>(0, low_mask<T>());
+        let uniform = std::uniform_int_distribution<long long>(0, T(-1) >> (BIT_SIZE<T> / 2));
         for(size_t i = 0; i < random_runs; i++)
         {
             umax left = exponential(*generator);
@@ -1099,11 +1132,12 @@ namespace tiny_num::test
     runtime_proc test_mul(Random_Generator* generator, size_t random_runs)
     {
         using Res = Batch_Op_Result;
-        using umax = umax;
         using POD_Vector = POD_Vector<T>;
         using Padded = Padded_POD_Vector<T>;
         using CSlice = Slice<const T>;
         using Slice = Slice<T>;
+
+        using namespace tiny_num;
 
         runtime_proc test_fused_mul_add = [&](umax left_, umax right_, umax coef, umax expected, Optims optims = Optims{}) -> bool{
             POD_Vector left = make_vector_of_digits<T>(left_);
@@ -1114,8 +1148,8 @@ namespace tiny_num::test
             Slice right_s = slice(&right);
             Slice output_s = slice(&output);
 
-            let res_out = batch_fused_mul_add_overflow<T>(&output_s, left_s, right_s, cast(T) coef, optims, Location::OUT_OF_PLACE);
-            let res_in = batch_fused_mul_add_overflow<T>(&left_s, left_s, right_s, cast(T) coef, optims, Location::IN_PLACE);
+            let res_out = batch_fused_mul_add_overflow(&output_s, left_s, right_s, cast(T) coef, optims, Location::OUT_OF_PLACE);
+            let res_in = batch_fused_mul_add_overflow(&left_s, left_s, right_s, cast(T) coef, optims, Location::IN_PLACE);
         
             push_back(&output, res_out.overflow);
             push_back(&left, res_in.overflow);
@@ -1137,9 +1171,9 @@ namespace tiny_num::test
             POD_Vector left = make_vector_of_digits<T>(left_);
             POD_Vector right = make_vector_of_digits<T>(right_);
 
-            size_t to_size = required_mul_out_size(size(left), size(right));
-            size_t aux_size1 = required_mul_quadratic_aux_size(size(left), size(right));
-            size_t aux_size2 = required_mul_karatsuba_aux_size(size(left), size(right), 1);
+            size_t to_size = tiny_num_u64::required_mul_out_size(size(left), size(right));
+            size_t aux_size1 = tiny_num_u64::required_mul_quadratic_aux_size(size(left), size(right));
+            size_t aux_size2 = tiny_num_u64::required_mul_karatsuba_aux_size(size(left), size(right), 1);
 
             size_t aux_size = max(aux_size1, aux_size2)*10; //to allow all karatsuba recursions
 
@@ -1151,13 +1185,13 @@ namespace tiny_num::test
             CSlice left_s = slice(left);
             CSlice right_s = slice(right);
 
-            tiny_num::mul_quadratic<T>(&res_s, &aux_s, left_s, right_s, optims);
+            tiny_num::mul_quadratic(&res_s, &aux_s, left_s, right_s, optims);
             let normal = to_number(res_s);
 
-            tiny_num::mul_quadratic_fused<T>(&res_s, left_s, right_s, optims);
+            tiny_num::mul_quadratic_fused(&res_s, left_s, right_s, optims);
             let fused = to_number(res_s);
 
-            tiny_num::mul_karatsuba<T>(&res_s, &aux_s, left_s, right_s, optims);
+            tiny_num::mul_karatsuba(&res_s, &aux_s, left_s, right_s, optims);
             let karatsuba = to_number(res_s);
 
             return expected == normal && expected == fused && expected == karatsuba;
@@ -1222,17 +1256,18 @@ namespace tiny_num::test
     runtime_proc test_div(Random_Generator* generator, size_t random_runs)
     {
         using Res = Batch_Op_Result;
-        using umax = umax;
         using POD_Vector = POD_Vector<T>;
         using Padded = Padded_POD_Vector<T>;
         using CSlice = Slice<const T>;
         using Slice = Slice<T>;
 
+        using namespace tiny_num;
+
         runtime_proc test_div = [&](umax num_, umax den_, umax ex_quotient, umax ex_remainder, Optims optims = Optims{}) -> bool{
             POD_Vector num = make_vector_of_digits<T>(num_); 
             POD_Vector den = make_vector_of_digits<T>(den_);
-            size_t quo_size = required_div_quotient_size(size(num), size(den));
-            size_t rem_size = required_div_remainder_size(size(num), size(den));
+            size_t quo_size = tiny_num_u64::required_div_quotient_size(size(num), size(den));
+            size_t rem_size = tiny_num_u64::required_div_remainder_size(size(num), size(den));
 
             POD_Vector quo = make_sized_vector<T>(quo_size); 
             POD_Vector rem = make_sized_vector<T>(rem_size);
@@ -1242,12 +1277,11 @@ namespace tiny_num::test
             Slice num_s = slice(&num);
             Slice den_s = slice(&den);
 
-            let div_res = tiny_num::div<T>(&quo_s, &rem_s, num_s, den_s, optims);
+            let div_res = tiny_num::div(&quo_s, &rem_s, num_s, den_s, optims);
             let quotient = to_number(div_res.quotient);
             let remainder = to_number(div_res.remainder);
             return ex_quotient == quotient && ex_remainder == remainder;
         };
-
 
         runtime_proc auto_test_div = [&](umax left, umax right, Optims optims = Optims{}) -> bool{
             if(right == 0)
@@ -1293,65 +1327,63 @@ namespace tiny_num::test
         };
     }
 
-    template <typename Num, typename Rep, typename Conv_Fn>
-    func to_base(Slice<const Num> num, Num base, Conv_Fn conv, Optims optims) -> POD_Vector<Rep> {
-        POD_Vector<Num> temp = make_vector_of_slice<Num>(num);
-        size_t required_size = required_to_base_out_size(num.size, base, BIT_SIZE<Num>);
-        POD_Vector<Rep> out = make_sized_vector<Rep>(required_size);
+    template <typename T>
+    func to_base(Slice<const T> num, T base, Optims optims) -> POD_Vector<char> {
+        POD_Vector<T> temp = make_vector_of_slice<T>(num);
+        size_t required_size = tiny_num_u64::required_to_base_out_size(num.size, base, BIT_SIZE<T>);
+        POD_Vector<char> out = make_sized_vector<char>(required_size);
 
-        Slice<Num> temp_s = slice(&temp);
-        Slice<Rep> out_s = slice(&out);
+        Slice<T> temp_s = slice(&temp);
+        Slice<char> out_s = slice(&out);
 
-        Slice<Rep> converted = (to_base<Num, Rep>(&out_s, &temp_s, num, base, conv, optims));
+        Slice<char> converted = (tiny_num::to_chars(&out_s, &temp_s, num, base, optims));
 
         resize(&out, converted.size);
         return out;
     };
 
-    template <typename Num, typename Rep, typename Conv_Fn>
-    func from_base(Slice<const Rep> rep, Num base, Conv_Fn conv, Optims optims) -> POD_Vector<Num> {
-        size_t required_size = required_from_base_out_size(rep.size, base, BIT_SIZE<Num>);
-        POD_Vector<Num> out = make_sized_vector<Num>(required_size + 1);
+    template <typename T>
+    func from_base(Slice<const char> rep, T base, Optims optims) -> POD_Vector<T> {
+        size_t required_size = tiny_num_u64::required_from_base_out_size(rep.size, base, BIT_SIZE<T>);
+        POD_Vector<T> out = make_sized_vector<T>(required_size + 1);
 
-        Slice<Num> out_s = slice(&out);
-        Optional_Slice<Num> converted = from_base<Num, Rep>(&out_s, rep, base, conv, optims);
-        assert(converted.ok && is_striped_number(converted.slice));
+        Slice<T> out_s = slice(&out);
+        let converted = tiny_num::from_chars(&out_s, rep, base, optims);
+        assert(converted.ok && tiny_num::is_striped_number(converted.slice));
         resize(&out, converted.slice.size);
         return out;
     };
 
-    template <typename Num, typename Rep>
-    func native_to_base(umax num, Num base) -> POD_Vector<Rep> 
+    template <typename T>
+    func native_to_base(umax num, T base) -> POD_Vector<char> 
     {
-        using umax = umax;
-        constexpr size_t num_digits = digits_to_represent<Num, umax>();
-        const size_t max_size = required_to_base_out_size(num_digits, base, BIT_SIZE<Num>);
+        constexpr size_t num_digits = MAX_TYPE_SIZE_FRACTION<T>;
+        const size_t max_size = tiny_num_u64::required_to_base_out_size(num_digits, base, BIT_SIZE<T>);
 
-        POD_Vector<Rep> converted = make_sized_vector<Rep>(max_size);
+        POD_Vector<char> converted = make_sized_vector<char>(max_size);
         size_t size = 0;
         for(umax curr_val = num; curr_val != 0; curr_val /= base, size ++)
         {
             umax rem = curr_val % base;
-            converted[size] = cast(Rep) rem;
+            converted[size] = tiny_num_u64::to_char(rem);
         }
 
         resize(&converted, size);
-        Slice<Rep> converted_s = slice(&converted);
-        reverse(&converted_s);
+        size_t half_size = size / 2;
+        for(size_t i = 0; i < half_size; i++)
+            std::swap(converted[i], converted[size - i - 1]);
 
         return converted;
     };
 
-    template <typename Num, typename Rep>
-    func native_from_base(Slice<const Rep> rep, Num base) -> umax 
+    template <typename T>
+    func native_from_base(Slice<const char> rep, T base) -> umax 
     {
-        using umax = umax;
-
         umax value = 0;
         for(size_t i = 0; i < rep.size; i++)
         {
             umax muled = value * base;
-            umax added = muled + rep[i];
+            umax added = muled + tiny_num_u64::to_digit(rep[i]);
             assert(muled >= value);
             assert(added >= muled);
 
@@ -1361,110 +1393,113 @@ namespace tiny_num::test
         return value;
     };
 
-    template <typename Num, typename Rep>
+
+    template <typename T>
+    func slice_equals(Slice<T> left, Slice<T> right) -> bool
+    {
+        if(left.size != right.size)
+            return false;
+
+        for(size_t i = 0; i < left.size; i++)
+            if(left[i] != right[i])
+                return false;
+
+        return true;
+    }
+
+    template <typename T>
     runtime_proc test_to_base(Random_Generator* generator, size_t random_runs)
     {
-        static_assert(sizeof(Num) >= sizeof(Rep));
-        using umax = umax;
 
-        proc id_to_conversion = [](Num num) -> Rep {return cast(Rep) num;};
-        proc id_from_conversion = [](Rep num) -> Num {return cast(Num) num;};
-
-        runtime_proc test_to_base = [&](Slice<const Num> num, Num base, Slice<const Rep> expected_rep, Optims optims) -> bool 
+        runtime_proc manual_test_to_base = [&](umax num, T base, cstring expected_rep, Optims optims = Optims{}) -> bool 
         {
-            POD_Vector<Rep> converted = to_base<Num, Rep>(num, base, id_to_conversion, optims);
+            POD_Vector<T> num_ = make_vector_of_digits<T>(num);
+            POD_Vector<char> converted = to_base<T>(slice(num_), base, optims);
 
-            return is_equal<Rep>(slice(converted), expected_rep);
+            return slice_equals(slice(converted), slice(expected_rep));
         };
 
-        runtime_proc manual_test_to_base = [&](umax num, Num base, std::initializer_list<Rep> expected_rep, Optims optims = Optims{}) -> bool 
+        runtime_proc auto_test_to_base = [&](umax num, T base, Optims optims) -> bool 
         {
-            POD_Vector<Num> num_ = make_vector_of_digits<Num>(num);
-            Slice<const Rep> expected_rep_s = {std::data(expected_rep), std::size(expected_rep)};
-            return test_to_base(slice(num_), base, expected_rep_s, optims);
+            POD_Vector<T> num_ = make_vector_of_digits<T>(num);
+            POD_Vector<char> expected_rep = native_to_base<T>(num, base);
+            POD_Vector<char> converted = to_base<T>(slice(num_), base, optims);
+
+            return slice_equals(slice(converted), slice(expected_rep));
         };
 
-        runtime_proc auto_test_to_base = [&](umax num, Num base, Optims optims) -> bool 
+        runtime_proc manual_test_from_base = [&](cstring rep, T base, umax expected_num, Optims optims = Optims{}) -> bool 
         {
-            POD_Vector<Num> num_ = make_vector_of_digits<Num>(num);
-            POD_Vector<Rep> expected_rep = native_to_base<Num, Rep>(num, base);
-            return test_to_base(slice(num_), base, slice(expected_rep), optims);
+            POD_Vector<T> expected_num_ = make_vector_of_digits<T>(expected_num);
+            POD_Vector<T> converted = from_base<T>(slice(rep), base, optims);
+
+            return slice_equals(slice(converted), slice(expected_num_));
         };
 
-        runtime_proc test_from_base = [&](Slice<const Rep> rep, Num base, Slice<const Num> expected_num, Optims optims) -> bool 
+        runtime_proc auto_test_from_base = [&](Slice<const char> rep, T base, Optims optims) -> bool 
         {
-            POD_Vector<Num> num = from_base<Num, Rep>(rep, base, id_from_conversion, optims);
-        
-            return is_equal<Num>(slice(num), expected_num);
+            umax num = native_from_base<T>(rep, base);
+            POD_Vector<T> expected_num = make_vector_of_digits<T>(num);
+            POD_Vector<T> converted = from_base<T>(rep, base, optims);
+
+            return slice_equals(slice(converted), slice(expected_num));
         };
 
-        runtime_proc manual_test_from_base = [&](std::initializer_list<Rep> rep, Num base, umax expected_num, Optims optims = Optims{}) -> bool 
+        runtime_proc test_to_and_fro = [&](umax value, T base, Optims optims) -> bool
         {
-            POD_Vector<Num> expected_num_ = make_vector_of_digits<Num>(expected_num);
-            Slice<const Rep> rep_s = {std::data(rep), std::size(rep)};
-            return test_from_base(rep_s, base, slice(expected_num_), optims);
-        };
+            POD_Vector<T> initial = make_vector_of_digits<T>(value);
+            let rep = to_base<T>(slice(initial), base, optims);
+            let num = from_base<T>(slice(rep), base, optims);
+            Slice<const T> num_s = slice(num);
+            let obtained_value = tiny_num::to_number(num_s);
 
-        runtime_proc auto_test_from_base = [&](Slice<const Rep> rep, Num base, Optims optims) -> bool 
-        {
-            umax num = native_from_base<Num, Rep>(rep, base);
-            POD_Vector<Num> expected_num = make_vector_of_digits<Num>(num);
-            return test_from_base(rep, base, slice(expected_num), optims);
-        };
-
-        runtime_proc test_to_and_fro = [&](umax value, Num base, Optims optims) -> bool
-        {
-            POD_Vector<Num> initial = make_vector_of_digits<Num>(value);
-            let rep = to_base<Num, Rep>(slice(initial), base, id_to_conversion, optims);
-            let num = from_base<Num, Rep>(slice(rep), base, id_from_conversion, optims);
-            Slice<const Num> num_s = slice(num);
-            let obtained_value = to_number(num_s);
-
-            bool match = is_equal<Num>(slice(num), slice(initial));
+            bool match = tiny_num::is_equal(slice(num), slice(initial));
             return match;
         };
 
-        assert((manual_test_to_base(1, 2, {1})));
-        assert((manual_test_to_base(2, 2, {1,0})));
-        assert((manual_test_to_base(4, 2, {1,0,0})));
-        assert((manual_test_to_base(5, 2, {1,0,1})));
-        assert((manual_test_to_base(10, 2, {1,0,1,0})));
+        assert((manual_test_to_base(1, 2, "1")));
+        assert((manual_test_to_base(2, 2, "10")));
+        assert((manual_test_to_base(4, 2, "100")));
+        assert((manual_test_to_base(5, 2, "101")));
+        assert((manual_test_to_base(10, 2, "1010")));
 
-        assert((manual_test_to_base(0, 9, {})));
-        assert((manual_test_to_base(1, 9, {1})));
-        assert((manual_test_to_base(2, 9, {2})));
-        assert((manual_test_to_base(65453, 9, {1,0,8,7,0,5})));
-        assert((manual_test_to_base(844354, 9, {1,5,2,6,2,1,1})));
-        assert((manual_test_to_base(844354, 10, {8,4,4,3,5,4})));
+        assert((manual_test_to_base(0, 9, "")));
+        assert((manual_test_to_base(1, 9, "1")));
+        assert((manual_test_to_base(2, 9, "2")));
+        assert((manual_test_to_base(65453, 9, "108705")));
+        assert((manual_test_to_base(844354, 9, "1526211")));
+        assert((manual_test_to_base(844354, 10, "844354")));
 
-        assert((manual_test_from_base({1}, 2, 1)));
-        assert((manual_test_from_base({1,0}, 2, 2)));
-        assert((manual_test_from_base({1,0,0}, 2, 4)));
-        assert((manual_test_from_base({1,0,1}, 2, 5)));
-        assert((manual_test_from_base({1,0,1,0}, 2, 10)));
+        assert((manual_test_from_base("1", 2, 1)));
+        assert((manual_test_from_base("10", 2, 2)));
+        assert((manual_test_from_base("100", 2, 4)));
+        assert((manual_test_from_base("101", 2, 5)));
+        assert((manual_test_from_base("1010", 2, 10)));
 
-        assert((manual_test_from_base({}, 9, 0)));
-        assert((manual_test_from_base({1}, 9, 1)));
-        assert((manual_test_from_base({2}, 9, 2)));
-        assert((manual_test_from_base({1,0,8,7,0,5}, 9, 65453)));
-        assert((manual_test_from_base({1,5,2,6,2,1,1}, 9, 844354)));
-        assert((manual_test_from_base({8,4,4,3,5,4}, 10, 844354)));
+        assert((manual_test_from_base("", 9, 0)));
+        assert((manual_test_from_base("1", 9, 1)));
+        assert((manual_test_from_base("2", 9, 2)));
+        assert((manual_test_from_base("108705", 9, 65453)));
+        assert((manual_test_from_base("1526211", 9, 844354)));
+        assert((manual_test_from_base("844354", 10, 844354)));
 
         assert((test_to_and_fro(10, 2, Optims{})));
         assert((test_to_and_fro(59180470887883776, 3, Optims{})));
 
-        let num_dist = make_exponential_distribution<Num>();
-        constexpr size_t max_1 = std::numeric_limits<Rep>::max() >> HALF_BIT_SIZE<Rep>;
-        constexpr size_t max_2 = std::numeric_limits<Num>::max() >> HALF_BIT_SIZE<Num>;
+        let num_dist = make_exponential_distribution<T>();
 
-        let base_dist = make_exponential_distribution<Num, Num>(2, cast(Num) min(max_1, max_2));
+        //algorhitm requires the base to be low_bits only
+        // this is only ever a problem for u8 (which is testing only)
+        T max_base = sizeof(T) == 1 ? 15 : 36;
+
+        let base_dist = make_exponential_distribution<T, T>(2, max_base);
         assert(auto_test_to_base(250, 2, Optims{}));
 
         for(size_t i = 0; i < random_runs; i++)
         {
             Optims optims = generate_random_optims(generator);
             umax num = num_dist(*generator);
-            Num base = base_dist(*generator);
+            T base = base_dist(*generator);
 
             assert(auto_test_to_base(num, base, optims));
             assert(test_to_and_fro(num, base, optims));
@@ -1475,7 +1510,6 @@ namespace tiny_num::test
     runtime_proc test_pow(Random_Generator* generator, size_t random_runs, size_t controlled_runs)
     {
         using Res = Batch_Op_Result;
-        using umax = umax;
         using POD_Vector = POD_Vector<T>;
         using Padded = Padded_POD_Vector<T>;
         using CSlice = Slice<const T>;
@@ -1488,11 +1522,13 @@ namespace tiny_num::test
             SQUARING
         };
 
+        using namespace tiny_num;
+
         runtime_proc pow_ = [&](CSlice num, size_t pow, Optims optims, Pow_Algorhitm algorhitm) -> POD_Vector {
             size_t log2num = log2(num);
 
-            size_t required_size = required_pow_out_size(log2num, pow, BIT_SIZE<T>);
-            size_t aux_size = required_pow_by_squaring_aux_size(log2num, pow, BIT_SIZE<T>)*100 + 100;
+            size_t required_size = tiny_num_u64::required_pow_out_size(log2num, pow, BIT_SIZE<T>);
+            size_t aux_size = tiny_num_u64::required_pow_by_squaring_aux_size(log2num, pow, BIT_SIZE<T>)*100 + 100;
             POD_Vector out = make_sized_vector<T>(required_size);
             POD_Vector aux = make_sized_vector<T>(aux_size);
 
@@ -1501,11 +1537,11 @@ namespace tiny_num::test
 
             Slice powed;
             if(algorhitm == TRIVIAL)
-                powed = tiny_num::pow_trivial<T>(&out_s, &aux_s, num, pow, optims);
+                powed = tiny_num::pow_trivial(&out_s, &aux_s, num, pow, optims);
             else if(algorhitm == SQUARING)
-                powed = tiny_num::pow_by_squaring<T>(&out_s, &aux_s, num, pow, optims);
+                powed = tiny_num::pow_by_squaring(&out_s, &aux_s, num, pow, optims);
             else
-                powed = tiny_num::pow<T>(&out_s, &aux_s, num, pow, optims);
+                powed = tiny_num::pow(&out_s, &aux_s, num, pow, optims);
 
             resize(&out, powed.size);
             return out;
@@ -1539,7 +1575,7 @@ namespace tiny_num::test
             assert(is_striped_number(powed_s));
             assert(is_striped_number(expected));
         
-            return is_equal<T>(powed_s, expected);
+            return is_equal(powed_s, expected);
         };
 
         assert(pow_trivial(0, 0) == 1);
@@ -1585,27 +1621,27 @@ namespace tiny_num::test
         assert(optimal_pow(5465, 3) == 5465ull*5465ull*5465ull);
     }
     
-
     template <typename T>
     runtime_proc test_root(Random_Generator* generator, size_t random_runs, size_t controlled_runs)
     {
         using Res = Batch_Op_Result;
-        using umax = umax;
         using POD_Vector = POD_Vector<T>;
         using Padded = Padded_POD_Vector<T>;
         using CSlice = Slice<const T>;
         using Slice = Slice<T>;
 
+        using namespace tiny_num;
+
         runtime_proc root_ = [&](CSlice num, size_t root, Optims optims) -> POD_Vector {
-            size_t required_size = required_root_out_size(log2(num), root, BIT_SIZE<T>);
-            size_t aux_size = required_root_aux_size(log2(num), root, BIT_SIZE<T>);
+            size_t required_size = tiny_num_u64::required_root_out_size(log2(num), root, BIT_SIZE<T>);
+            size_t aux_size = tiny_num_u64::required_root_aux_size(log2(num), root, BIT_SIZE<T>);
             POD_Vector out = make_sized_vector<T>(required_size);
             POD_Vector aux = make_sized_vector<T>(aux_size);
 
             Slice out_s = slice(&out);
             Slice aux_s = slice(&aux);
 
-            Slice rooted = tiny_num::root<T>(&out_s, &aux_s, num, root, optims);
+            Slice rooted = tiny_num::root(&out_s, &aux_s, num, root, optims);
 
             resize(&out, rooted.size);
             return out;
@@ -1620,7 +1656,6 @@ namespace tiny_num::test
             return res;
         };
 
-
         assert(root(0, 0) == 1);
         assert(root(1, 0) == 1);
         assert(root(29, 3) == 3);
@@ -1629,13 +1664,13 @@ namespace tiny_num::test
         assert(root(15637, 3) == 25);
         assert(root(4096, 6) == 4);
 
+
         if(sizeof(T) != 1) //17th root is bigger than half bits of u8!
         {
             assert(root(18446744073709551614, 16) == 15);
             assert(root(18446744073709551614, 17) == 13);
         }
     }
-
     runtime_proc run_typed_tests(Random_Generator* generator, size_t random_runs, size_t controlled_runs)
     {
         std::cout << "TESTING UNTYPED "<< std::endl;
@@ -1647,6 +1682,7 @@ namespace tiny_num::test
     runtime_proc run_untyped_tests(Random_Generator* generator, size_t random_runs, size_t controlled_runs, cstring type_name)
     {
         std::cout << "TESTING: " << type_name << std::endl;
+
 
         std::cout << "add...        ";
         test_add_overflow<T>(generator, random_runs);
@@ -1671,12 +1707,12 @@ namespace tiny_num::test
         std::cout << "div short...  ";
         test_div_overflow<T>(generator, random_runs, controlled_runs);
         std::cout << "ok" << std::endl;
-
+        
         std::cout << "mul long...   ";
         test_mul<T>(generator, random_runs);
         std::cout << "ok" << std::endl;
 
-        std::cout << "mul long...   ";
+        std::cout << "div long...   ";
         test_div<T>(generator, random_runs);
         std::cout << "ok" << std::endl;
 
@@ -1689,20 +1725,9 @@ namespace tiny_num::test
         std::cout << "ok" << std::endl;
 
         std::cout << "conversion... ";
-        const size_t quarter_runs = random_runs / 4;
-        if constexpr(sizeof(T) >= sizeof(u8))
-            test_to_base<T, u8>(generator, quarter_runs);
-
-        if constexpr(sizeof(T) >= sizeof(u16))
-            test_to_base<T, u16>(generator, quarter_runs);
-
-        if constexpr(sizeof(T) >= sizeof(u32))
-            test_to_base<T, u32>(generator, quarter_runs);
-
-        if constexpr(sizeof(T) >= sizeof(u64))
-            test_to_base<T, u64>(generator, quarter_runs);
-
+        test_to_base<T>(generator, random_runs);
         std::cout << "ok" << std::endl;
+
         std::cout << "=== OK ===\n" << std::endl;
     }
 
@@ -1733,9 +1758,6 @@ namespace tiny_num::test
         std::cout << "tests ellapsed: " << ns << " ns" << std::endl;
     }
 }
-
-
-
 
 #undef let 
 #undef mut 
