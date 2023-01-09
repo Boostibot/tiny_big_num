@@ -18,6 +18,9 @@
     <ClCompile Include="tiny_big_num_.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="tiny_big_num.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="xigoi.h">

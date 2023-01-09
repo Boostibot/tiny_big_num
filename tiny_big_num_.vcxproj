@@ -129,6 +129,7 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClCompile Include="tiny_big_num.cpp" />
     <ClCompile Include="tiny_big_num_.cpp" />
   </ItemGroup>
   <ItemGroup>
