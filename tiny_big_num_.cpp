@@ -1,11 +1,12 @@
 #include <iostream>
 #include <string>
 
-#include "tests.h"
+#include "tiny_big_num.h"
+//#include "tests.h"
 
 int main()
 {
-    tiny_num_test::run_tests();
+    //tiny_num_test::run_tests();
 }
 
 /*
