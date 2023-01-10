@@ -1,44 +1,13 @@
 #include "tiny_big_num.h"
 
+
 #define cast(...) (__VA_ARGS__)
-//#define CHAR_BIT 8
 
-//#ifdef INCLUDED_NEW_TYPE
-//#ifndef TINY_NUM_LIB_NAME
-//#ifdef INCLUDED_TINY_NUM_TYPE_DEF
-//#define TINY_NUM_LIB_NAME tiny_num
-//#else
-//#error "name must be provided!"
-//#endif
-//#endif 
-//
-//#define CONCAT_(a, b) a ## b
-//#define CONCAT(a, b) CONCAT_(a, b)
-//
-////name macro prepends the lib name to every exported symbol
-//#define N(a) CONCAT(TINY_NUM_LIB_NAME, a)
-//#endif
-
-Optims make_def_optims()
+typedef enum Iter_Direction 
 {
-    Optims optims;
-    optims.mul_shift = DO_OPTIM_MUL_SHIFT;
-    optims.mul_half_bits = DO_OPTIM_MUL_HALF_BITS;
-    optims.div_shift = DO_OPTIM_DIV_SHIFT;
-
-    optims.max_recursion_depth = MAX_RECURSION_DEPTH;
-    optims.mul_quadratic_both_below_size = MUL_QUADRATIC_BOTH_BELOW_SIZE;
-    optims.mul_quadratic_single_below_size = MUL_QUADRATIC_SINGLE_BELOW_SIZE;
-    optims.pow_trivial_below_power = TRIVIAL_POW_BELOW_POWER;
-
-    return optims;
-}
-
-enum Iter_Direction 
-{
-    FORWARD,
-    BACKWARD
-};
+    ITER_DIR_FORWARD,
+    ITER_DIR_BACKWARD
+} Iter_Direction;
 
 typedef struct Single_Overflow
 {
@@ -57,6 +26,27 @@ typedef struct Power_And_Powed
     umax power;
     umax powed;
 } Power_And_Powed;
+
+Optims make_def_optims()
+{
+    Optims optims = {0};
+    optims.mul_shift = DO_OPTIM_MUL_SHIFT;
+    optims.mul_half_bits = DO_OPTIM_MUL_HALF_BITS;
+    optims.div_shift = DO_OPTIM_DIV_SHIFT;
+
+    optims.max_recursion_depth = MAX_RECURSION_DEPTH;
+    optims.mul_quadratic_both_below_size = MUL_QUADRATIC_BOTH_BELOW_SIZE;
+    optims.mul_quadratic_single_below_size = MUL_QUADRATIC_SINGLE_BELOW_SIZE;
+    optims.pow_trivial_below_power = TRIVIAL_POW_BELOW_POWER;
+
+    return optims;
+}
+
+Batch_Overflow make_batch_overflow(Slice slice, Digit overflow)
+{
+    Batch_Overflow res = {slice, overflow};
+    return res;
+}
 
 Result ok_result(Slice output)
 {
@@ -126,7 +116,7 @@ size_t find_last_set_bit(umax val)
     return k;
 }
 
-size_t log2(umax val)
+size_t log2_umax(umax val)
 {
     return find_last_set_bit(val);
 }
@@ -160,7 +150,7 @@ size_t find_first_set_bit(umax val)
 
 size_t pop_count(umax val)
 {
-    uint32_t low = cast(uint32_t) (val & 0xFFFF'FFFF);
+    uint32_t low = cast(uint32_t) (val & 0xFFFFFFFF);
     uint32_t high = cast(uint32_t) (val >> 32);
 
     return pop_count_u32(low) + pop_count_u32(high);
@@ -203,7 +193,8 @@ umax single_root_shifting(umax x, umax n)
         return x;
 
     umax r = 1;
-    umax s = cast(umax) ((find_last_set_bit(cast(umax) x) / n) * n);
+    umax log2x = cast(umax) log2_umax(cast(umax) x);
+    umax s = (log2x / n) * n;
 
     while(true)
     {
@@ -250,7 +241,7 @@ umax single_root_newton(umax of_value, umax power)
     //  so the upper estimate for r is:
     //      2^[ ([log2(x)] + n) / n ]
 
-    const umax log2x = cast(umax) find_last_set_bit(cast(umax) x);
+    const umax log2x = cast(umax) log2_umax(cast(umax) x);
 
     const umax upper_initial_estimate = cast(umax) 1 << ((log2x + n) / n);
     umax r = upper_initial_estimate;
@@ -501,7 +492,7 @@ Digit get_bit(Digit field, size_t bit_pos)
     return (field >> bit_pos) & 1u;
 };
 
-Digit set_nth_bit(Slice* num, size_t i, Digit val)
+void set_nth_bit(Slice* num, size_t i, Digit val)
 {
     const size_t digit_i = i / DIGIT_BIT_SIZE;
     const size_t bit_i = i % DIGIT_BIT_SIZE;
@@ -618,7 +609,7 @@ umax to_number(CSlice bignum)
 
 Slice from_number(Slice* bignum, umax from)
 {
-    constexpr size_t count = sizeof(umax) / sizeof(Digit);
+    const size_t count = sizeof(umax) / sizeof(Digit);
     assert(bignum->size >= count);
 
     size_t i = 0;
@@ -676,7 +667,9 @@ Single_Overflow single_add_overflow_any(Digit carry, Digit a1, Digit a2, Digit a
     const Digit res_high = high_bits(a1) + high_bits(a2) + high_bits(a3) + middle_carry;
     const Digit new_carry = high_bits(res_high);
 
-    return Single_Overflow{combine_bits(res_low, res_high), new_carry};
+    const Digit combined = combine_bits(res_low, res_high);
+    Single_Overflow result = {combined, new_carry};
+    return result;
 }
 
 Single_Overflow single_sub_overflow_any(Digit carry, Digit left, Digit a2, Digit a3)
@@ -687,7 +680,9 @@ Single_Overflow single_sub_overflow_any(Digit carry, Digit left, Digit a2, Digit
     const Digit res_high = high_mask() + high_bits(left) - (high_bits(a2) + high_bits(a3)) - middle_carry;
     const Digit new_carry = low_mask() - high_bits(res_high);
 
-    return Single_Overflow{combine_bits(res_low, res_high), new_carry};
+    const Digit combined = combine_bits(res_low, res_high);
+    Single_Overflow result = {combined, new_carry};
+    return result;
 }
 
 Single_Overflow single_add_overflow(Digit left, Digit right, Digit carry)
@@ -710,7 +705,9 @@ Single_Overflow single_complement_overflow(Digit val, Digit carry)
     const Digit complement_high = high_bits(val_inv) + middle_carry;
     const Digit new_carry = high_bits(complement_high);
 
-    return Single_Overflow{combine_bits(complement_low, complement_high), new_carry};
+    const Digit combined = combine_bits(complement_low, complement_high);
+    Single_Overflow result = {combined, new_carry};
+    return result;
 }
 
 Single_Overflow single_shift_up_overflow(Digit low_item, size_t by_bits, Digit high_item)
@@ -740,7 +737,8 @@ Single_Overflow single_shift_up_overflow(Digit low_item, size_t by_bits, Digit h
 
     const Digit out = high_bits_i(high_item, remaining_bits);
     const Digit shifted_out = out;
-    return Single_Overflow{composed, shifted_out};
+    Single_Overflow result = {composed, shifted_out};
+    return result;
 }
 
 Single_Overflow single_shift_down_overflow(Digit low_item, size_t by_bits, Digit high_item)
@@ -772,15 +770,17 @@ Single_Overflow single_shift_down_overflow(Digit low_item, size_t by_bits, Digit
 
     const Digit out = low_bits_i(low_item, by_bits);
     const Digit shifted_out = out << remaining_bits;
-    return Single_Overflow{composed, shifted_out};
+
+    Single_Overflow result = {composed, shifted_out};
+    return result;
 }
 
-enum Mul_Overflow_Optims
+typedef enum Mul_Overflow_Optims
 {
-    NONE,
-    HIGH_BITS_ONLY,
-    LOW_BITS_ONLY,
-};
+    MUL_OPTIMS_NONE = 0,
+    MUL_OPTIMS_HIGH_BITS_ONLY,
+    MUL_OPTIMS_LOW_BITS_ONLY,
+} Mul_Overflow_Optims;
 
 Single_Overflow single_mul_overflow(Digit left, Digit right, Digit last_value, Mul_Overflow_Optims mul_optims)
 {
@@ -837,13 +837,13 @@ Single_Overflow single_mul_overflow(Digit left, Digit right, Digit last_value, M
     //if we have either only low bits or high bits we dont have to do
     // one carry addition and one multiplication. This is pretty big difference when dealing with really large numbers
     // (there are also additional parts of the code that can be optimized away - such as shifting of s_mixed_ns_overflow etc...)
-    if(mul_optims == Mul_Overflow_Optims::LOW_BITS_ONLY)
+    if(mul_optims == MUL_OPTIMS_LOW_BITS_ONLY)
     {
         assert(high_bits(right) == 0);
         s_cur = l1*r1;
         s_mixed_ns = l2*r1;
     }
-    else if(mul_optims == Mul_Overflow_Optims::HIGH_BITS_ONLY)
+    else if(mul_optims == MUL_OPTIMS_HIGH_BITS_ONLY)
     {
         assert(low_bits(right) == 0);
         s_mixed_ns = l1*r2;
@@ -851,7 +851,7 @@ Single_Overflow single_mul_overflow(Digit left, Digit right, Digit last_value, M
     }
     else
     {
-        Single_Overflow s_mixed_ns_res = single_add_overflow(l1*r2, l2*r1);
+        Single_Overflow s_mixed_ns_res = single_add_overflow(l1*r2, l2*r1, 0);
 
         s_mixed_ns = s_mixed_ns_res.value;
         s_mixed_ns_overflow = s_mixed_ns_res.overflow;
@@ -870,7 +870,8 @@ Single_Overflow single_mul_overflow(Digit left, Digit right, Digit last_value, M
     Single_Overflow curr_value = single_add_overflow_any(0, s_cur, low_mixed, last_value); //also add last_value to save ops
     Digit next_value = single_add_no_overflow(s_next_ns, high_mixed, curr_value.overflow); //also add the overflow
 
-    return Single_Overflow{curr_value.value, next_value};
+    Single_Overflow result = {curr_value.value, next_value};
+    return result;
 }
 
 Single_Overflow single_div_overflow(Digit left, Digit right, Digit carry_in)
@@ -898,7 +899,9 @@ Single_Overflow single_div_overflow(Digit left, Digit right, Digit carry_in)
     const Digit out_carry = operand_low % right;
 
     const Digit res = dirty_combine_bits(res_low, res_high);
-    return Single_Overflow{res, out_carry};
+
+    Single_Overflow result = {res, out_carry};
+    return result;
 }
 
 bool single_is_power_of_two(Digit num)
@@ -906,15 +909,13 @@ bool single_is_power_of_two(Digit num)
     return num != 0 && (num & (num - 1)) == 0;
 }
 
-
-
-Batch_Overflow batch_add_or_sub_overflow_short(Slice* to, CSlice left, Digit carry, bool is_addition, size_t from)
+Batch_Overflow batch_add_or_sub_overflow_short(Slice* to, CSlice left, Digit carry, bool is_addition)
 {
     assert(to->size >= left.size);
     assert(are_one_way_aliasing(left, to_cslice(*to)) == false);
 
     const Slice trimmed_to = trim(*to, left.size);
-    size_t j = from;
+    size_t j = 0;
     for (; carry != 0 && j < left.size != 0; j++)
     {
         const Digit digit = at(left, j);
@@ -940,17 +941,18 @@ Batch_Overflow batch_add_or_sub_overflow_short(Slice* to, CSlice left, Digit car
         copy_slice(&remainign_to, cslice(left, j));
     }
 
-    return Batch_Overflow{trimmed_to, carry};
+    Batch_Overflow result = {trimmed_to, carry};
+    return result;
 }
 
-Batch_Overflow batch_add_overflow_short(Slice* to, CSlice left, Digit right, size_t from)
+Batch_Overflow batch_add_overflow_short(Slice* to, CSlice left, Digit right)
 {
-    return batch_add_or_sub_overflow_short(to, left, right, true, from);
+    return batch_add_or_sub_overflow_short(to, left, right, true);
 }
 
-Batch_Overflow batch_sub_overflow_short(Slice* to, CSlice left, Digit right, size_t from)
+Batch_Overflow batch_sub_overflow_short(Slice* to, CSlice left, Digit right)
 {
-    return batch_add_or_sub_overflow_short(to, left, right, false, from);
+    return batch_add_or_sub_overflow_short(to, left, right, false);
 }
 
 Batch_Overflow batch_add_overflow_long(Slice* to, CSlice left, CSlice right, Digit carry_in)
@@ -963,15 +965,18 @@ Batch_Overflow batch_add_overflow_long(Slice* to, CSlice left, CSlice right, Dig
     if(left.size < right.size)
         swap_cslice(&left, &right);
 
+    Slice trimmed_to = trim(*to, right.size);
     Digit carry = carry_in;
     for (size_t i = 0; i < right.size; i++)
     {
         Single_Overflow res = single_add_overflow(at(left, i), at(right, i), carry);
-        at(*to, i) = res.value;
+        at(trimmed_to, i) = res.value;
         carry = res.overflow;
     }
 
-    return batch_add_overflow_short(to, left, carry, right.size);
+    Slice remaining_to = slice(trimmed_to, right.size);
+    CSlice remaining_added = cslice(left, right.size);
+    return batch_add_overflow_short(&remaining_to, remaining_added, carry);
 }
 
 Batch_Overflow batch_sub_overflow_long(Slice* to, CSlice left, CSlice right, Digit carry_in)
@@ -984,24 +989,32 @@ Batch_Overflow batch_sub_overflow_long(Slice* to, CSlice left, CSlice right, Dig
     Digit carry = carry_in;
     const size_t min_size = min(left.size, right.size);
     const size_t max_size = max(left.size, right.size);
+
+    Slice trimmed_to = trim(*to, max_size);
+
     for (size_t i = 0; i < min_size; i++)
     {
         Single_Overflow oveflow = single_sub_overflow(at(left, i), at(right, i), carry);
-        at(*to, i) = oveflow.value;
+        at(trimmed_to, i) = oveflow.value;
         carry = oveflow.overflow;
     }
 
     for (size_t i = left.size; i < right.size; i++)
     {
         Single_Overflow oveflow = single_sub_overflow(cast(Digit) 0, at(right, i), carry);
-        at(*to, i) = oveflow.value;
+        at(trimmed_to, i) = oveflow.value;
         carry = oveflow.overflow;
     }
 
     if(right.size < left.size)
-        return batch_sub_overflow_short(to, left, carry, right.size);
+    {
+        Slice remaining_to = slice(trimmed_to, right.size);
+        CSlice remaining_added = cslice(left, right.size);
+        return batch_sub_overflow_short(&remaining_to, remaining_added, carry);
+    }
 
-    return Batch_Overflow{trim(*to, max_size), carry};
+    Batch_Overflow result = {trimmed_to, carry};
+    return result;
 }
 
 Batch_Overflow batch_complement_overflow(Slice* to, CSlice left, Digit carry_in)
@@ -1019,8 +1032,14 @@ Batch_Overflow batch_complement_overflow(Slice* to, CSlice left, Digit carry_in)
         carry = res.overflow;
     }
 
-    return Batch_Overflow{trim(*to, left.size), carry};
+    return make_batch_overflow(trim(*to, left.size), carry);
 }
+
+//1111 == 15
+//0001
+
+//0000 == 0
+//0000 == 0
 
 //We allow shifting while iterating in both directions:
 // 
@@ -1041,13 +1060,13 @@ Batch_Overflow batch_shift_up_overflow(Slice* out, CSlice in, size_t by_bits,
     if(by_bits == 0)
     {
         copy_slice(&out_trimmed, in);
-        return Batch_Overflow{out_trimmed, carry_in};
+        return make_batch_overflow(out_trimmed, carry_in);
     }
 
     if(in.size == 0)
-        return Batch_Overflow{out_trimmed, carry_in};
+        return make_batch_overflow(out_trimmed, carry_in);
 
-    if(direction == Iter_Direction::FORWARD)
+    if(direction == ITER_DIR_FORWARD)
     {
         assert(are_one_way_aliasing(in, to_cslice(*out)) == false);
         Digit prev = carry_in;
@@ -1060,7 +1079,7 @@ Batch_Overflow batch_shift_up_overflow(Slice* out, CSlice in, size_t by_bits,
         }
 
         Single_Overflow carry_out = single_shift_up_overflow(prev, by_bits, 0);
-        return Batch_Overflow{out_trimmed, carry_out.value};
+        return make_batch_overflow(out_trimmed, carry_out.value);
     }
     else
     {
@@ -1081,7 +1100,7 @@ Batch_Overflow batch_shift_up_overflow(Slice* out, CSlice in, size_t by_bits,
 
 
         Single_Overflow carry_out = single_shift_up_overflow(shifted_out, by_bits, 0);
-        return Batch_Overflow{out_trimmed, carry_out.value};
+        return make_batch_overflow(out_trimmed, carry_out.value);
     }
 }
 
@@ -1094,15 +1113,14 @@ Batch_Overflow batch_shift_down_overflow(Slice* out, CSlice in, size_t by_bits,
     Slice out_trimmed = trim(*out, in.size);
     if(by_bits == 0)
     {
-        //@TODO: Handle carry_in! (consistently with the other edge case)
         copy_slice(&out_trimmed, in);
-        return Batch_Overflow{out_trimmed, carry_in};
+        return make_batch_overflow(out_trimmed, carry_in);
     }
 
     if(in.size == 0)
-        return Batch_Overflow{out_trimmed, carry_in};
+        return make_batch_overflow(out_trimmed, carry_in);
 
-    if(direction == Iter_Direction::FORWARD)
+    if(direction == ITER_DIR_FORWARD)
     {
         assert(are_one_way_aliasing(in, to_cslice(*out)) == false);
 
@@ -1122,7 +1140,7 @@ Batch_Overflow batch_shift_down_overflow(Slice* out, CSlice in, size_t by_bits,
         }
 
         Single_Overflow carry_out = single_shift_down_overflow(0, by_bits, shifted_out);
-        return Batch_Overflow{out_trimmed, carry_out.value};
+        return make_batch_overflow(out_trimmed, carry_out.value);
     }
     else
     {
@@ -1137,7 +1155,7 @@ Batch_Overflow batch_shift_down_overflow(Slice* out, CSlice in, size_t by_bits,
         }
 
         Single_Overflow carry_out = single_shift_down_overflow(0, by_bits, prev);
-        return Batch_Overflow{out_trimmed, carry_out.value};
+        return make_batch_overflow(out_trimmed, carry_out.value);
     }
 }
 
@@ -1150,13 +1168,13 @@ Batch_Overflow batch_mul_overflow(Slice* to, CSlice left, Digit right, const Opt
     Slice trimmed_to = trim(*to, left.size);
 
     if(right == 0) 
-        return Batch_Overflow{trim(*to, 0), 0};
+        return make_batch_overflow(trim(*to, 0), 0);
 
     if(right == 1)
     {
         if(trimmed_to.data != left.data)
             copy_slice(&trimmed_to, left);
-        return Batch_Overflow{trimmed_to, 0};
+        return make_batch_overflow(trimmed_to, 0);
     }
 
     if(optims->mul_shift)
@@ -1169,7 +1187,7 @@ Batch_Overflow batch_mul_overflow(Slice* to, CSlice left, Digit right, const Opt
             //  on the carry in/out in this case. This is not ideal and should be changed so that the
             //  shift itself handles carry in similar way to mul
             size_t shift_bits = find_last_set_bit(right);
-            return batch_shift_up_overflow(to, left, shift_bits, Iter_Direction::FORWARD, carry_in);
+            return batch_shift_up_overflow(to, left, shift_bits, ITER_DIR_FORWARD, carry_in);
         }
     }
 
@@ -1184,14 +1202,14 @@ Batch_Overflow batch_mul_overflow(Slice* to, CSlice left, Digit right, const Opt
         }                                               \
 
     if(optims->mul_half_bits && high_bits(right) == 0)
-        do_carry_loop((single_mul_overflow(at(left, i), right, carry, Mul_Overflow_Optims::LOW_BITS_ONLY)))
+        do_carry_loop((single_mul_overflow(at(left, i), right, carry, MUL_OPTIMS_LOW_BITS_ONLY)))
     else if(optims->mul_half_bits && low_bits(right) == 0)
-        do_carry_loop((single_mul_overflow(at(left, i), right, carry, Mul_Overflow_Optims::HIGH_BITS_ONLY)))
+        do_carry_loop((single_mul_overflow(at(left, i), right, carry, MUL_OPTIMS_HIGH_BITS_ONLY)))
     else
-        do_carry_loop((single_mul_overflow(at(left, i), right, carry, Mul_Overflow_Optims::NONE)))
+        do_carry_loop((single_mul_overflow(at(left, i), right, carry, MUL_OPTIMS_NONE)))
 
         #undef do_carry_loop
-        return Batch_Overflow{trimmed_to, carry};
+        return make_batch_overflow(trimmed_to, carry);
 }
 
 Batch_Overflow batch_div_overflow(Slice* to, CSlice left, Digit right, const Optims* optims, Digit carry_in)
@@ -1207,7 +1225,7 @@ Batch_Overflow batch_div_overflow(Slice* to, CSlice left, Digit right, const Opt
     {
         if(trimmed_to.data != left.data)
             copy_slice(&trimmed_to, left);
-        return Batch_Overflow{trimmed_to, 0}; 
+        return make_batch_overflow(trimmed_to, 0); 
     }
 
     if(optims->div_shift)
@@ -1215,10 +1233,12 @@ Batch_Overflow batch_div_overflow(Slice* to, CSlice left, Digit right, const Opt
         if(single_is_power_of_two(right))
         {
             size_t shift_bits = find_last_set_bit(right);
-            Batch_Overflow shift_res = batch_shift_down_overflow(to, left, shift_bits, Iter_Direction::BACKWARD, carry_in);
+
+            Batch_Overflow shift_res = batch_shift_down_overflow(to, left, shift_bits, ITER_DIR_BACKWARD, carry_in);
             //because of the way shifting down result is defined we have to process the reuslt
-            const Digit carry = shift_res.overflow >> (DIGIT_BIT_SIZE - shift_bits);
-            return Batch_Overflow{trimmed_to, carry};
+            Digit carry = shift_res.overflow >> (DIGIT_BIT_SIZE - shift_bits);
+
+            return make_batch_overflow(trimmed_to, carry);
         }
     }
 
@@ -1230,7 +1250,7 @@ Batch_Overflow batch_div_overflow(Slice* to, CSlice left, Digit right, const Opt
         carry = res.overflow;
     }
 
-    return Batch_Overflow{trimmed_to, carry};
+    return make_batch_overflow(trimmed_to, carry);
 }
 
 Digit batch_rem_overflow(CSlice left, Digit right, const Optims* optims, Digit carry_in)
@@ -1301,14 +1321,36 @@ size_t required_add_out_size(size_t left_size, size_t right_size)
     return max(left_size, right_size) + 1;
 }
 
-Result add_(Slice* to, CSlice left, CSlice right)
+Result add_short(Slice* to, CSlice left, Digit right)
+{
+    assert(is_striped_number(left));
+    if(to->size < required_add_out_size(left.size, 1))
+        return error_result(OUT_SIZE_TOO_SMALL);
+
+    Batch_Overflow res = batch_add_overflow_short(to, left, right);
+    if(res.overflow == 0)
+    {
+        assert(is_striped_number(to_cslice(res.slice)));
+        return ok_result(res.slice);
+    }
+
+    size_t slice_size = res.slice.size;
+    Slice trimmed_to = trim(*to, slice_size + 1);
+    at(trimmed_to, slice_size) = res.overflow;
+
+    assert(is_striped_number(to_cslice(trimmed_to)));
+
+    return ok_result(trimmed_to);
+}
+
+Result add(Slice* to, CSlice left, CSlice right)
 {
     assert(is_striped_number(left));
     assert(is_striped_number(right));
     if(to->size < required_add_out_size(left.size, right.size))
         return error_result(OUT_SIZE_TOO_SMALL);
 
-    Batch_Overflow res = batch_add_overflow_long(to, left, right);
+    Batch_Overflow res = batch_add_overflow_long(to, left, right, 0);
     if(res.overflow == 0)
     {
         assert(is_striped_number(to_cslice(res.slice)));
@@ -1329,15 +1371,13 @@ size_t required_sub_out_size(size_t left_size, size_t right_size)
     return left_size;
 }
 
-Result sub_(Slice* to, CSlice left, CSlice right)
+Result sub_short(Slice* to, CSlice left, Digit right)
 {
     assert(is_striped_number(left));
-    assert(is_striped_number(right));
-    if(to->size < required_sub_out_size(left.size, right.size))
+    if(to->size < required_sub_out_size(left.size, 1))
         return error_result(OUT_SIZE_TOO_SMALL);
 
-    Batch_Overflow res = batch_sub_overflow_long(to, left, right);
-    
+    Batch_Overflow res = batch_sub_overflow_short(to, left, right);
     if(res.overflow != 0)
     {
         Result result = {OK_EXEPTIONAL, res.slice};
@@ -1346,6 +1386,34 @@ Result sub_(Slice* to, CSlice left, CSlice right)
 
     Slice output = striped_trailing_zeros(res.slice);
     return ok_result(output);
+}
+
+Result sub(Slice* to, CSlice left, CSlice right)
+{
+    assert(is_striped_number(left));
+    assert(is_striped_number(right));
+    if(to->size < required_sub_out_size(left.size, right.size))
+        return error_result(OUT_SIZE_TOO_SMALL);
+
+    Batch_Overflow res = batch_sub_overflow_long(to, left, right, 0);
+    if(res.overflow != 0)
+    {
+        Result result = {OK_EXEPTIONAL, res.slice};
+        return result;
+    }
+
+    Slice output = striped_trailing_zeros(res.slice);
+    return ok_result(output);
+}
+
+Result sub_in_place(Slice* left, CSlice right)
+{
+    return sub(left, to_cslice(*left), right);
+}
+
+Result sub_short_in_place(Slice* left, Digit right)
+{
+    return sub_short(left, to_cslice(*left), right);
 }
 
 size_t required_mul_out_size(size_t left_size, size_t right_size)
@@ -1413,6 +1481,25 @@ Div_Short_Result div_short_in_place(Slice* left, Digit right, const Optims* opti
     return div_short(left, to_cslice(*left), right, optims);
 }
 
+Rem_Result rem_short(CSlice left, Digit right, const Optims* optims)
+{
+    assert(is_striped_number(left));
+    if(high_bits(right) != 0)
+    {
+        Rem_Result result = {ARGUMENTS_TOO_BIG};
+        return result;
+    }
+    if(right == 0)
+    {
+        Rem_Result result = {UNDEFINED_VALUE};
+        return result;
+    }
+
+    Rem_Result result = {OK};
+    result.remainder = batch_rem_overflow(left, right, optims, 0);
+    return result;
+}
+
 Div_Result div_bit_by_bit_(Slice* quotient, Slice* remainder, CSlice num, CSlice den, const Optims* optims, bool DO_QUOTIENT)
 {
     assert(is_striped_number(num));
@@ -1428,7 +1515,8 @@ Div_Result div_bit_by_bit_(Slice* quotient, Slice* remainder, CSlice num, CSlice
     if(DO_QUOTIENT)
         assert(are_aliasing(to_cslice(*quotient), to_cslice(*remainder)) == false);
 
-    assert(den.size > 0 && "cannot divide by zero!");
+    if(den.size == 0)
+        return error_div_result(UNDEFINED_VALUE);
 
     if(num.size == 0)
     {
@@ -1458,18 +1546,25 @@ Div_Result div_bit_by_bit_(Slice* quotient, Slice* remainder, CSlice num, CSlice
     {
         assert(trimmed_remainder.size > 0 && "at this point should not be 0");
 
+        Digit last_digit = last(den);
+        assert(last_digit != 0);
+
         Slice stripped_quotient;
         Digit remainder_val;
         if(DO_QUOTIENT)
         {
-            Batch_Overflow div_res = batch_div_overflow(&trimmed_quotient, num, last(den), optims);
-            stripped_quotient = striped_trailing_zeros(div_res.slice);
-            remainder_val = div_res.overflow;
+
+            Div_Short_Result div_res = div_short(&trimmed_quotient, num, last_digit, optims);
+            assert(div_res.state == OK);
+            stripped_quotient = div_res.quotient;
+            remainder_val = div_res.remainder;
         }
         else
         {
-            remainder_val = batch_rem_overflow(num, last(den), optims);
+            Rem_Result rem_res = rem_short(num, last_digit, optims);
+            assert(rem_res.state == OK);
             stripped_quotient = trim(trimmed_quotient, 0);
+            remainder_val = rem_res.remainder;
         }
 
         size_t remainder_size = 0;
@@ -1487,7 +1582,7 @@ Div_Result div_bit_by_bit_(Slice* quotient, Slice* remainder, CSlice num, CSlice
     for(size_t i = DIGIT_BIT_SIZE * num.size; i-- > 0; ) 
     {
         size_t last_size = curr_remainder.size;
-        Batch_Overflow shift_res = batch_shift_up_overflow(&curr_remainder, to_cslice(curr_remainder), 1);
+        Batch_Overflow shift_res = batch_shift_up_overflow(&curr_remainder, to_cslice(curr_remainder), 1, ITER_DIR_FORWARD, 0);
         const Digit num_ith_bit = get_nth_bit(num, i);
 
         if(shift_res.overflow != 0 || (last_size == 0 && num_ith_bit == 1))
@@ -1499,9 +1594,8 @@ Div_Result div_bit_by_bit_(Slice* quotient, Slice* remainder, CSlice num, CSlice
         set_nth_bit(&trimmed_remainder, 0, num_ith_bit);
         if(compare(to_cslice(curr_remainder), den) >= 0)
         {
-            Batch_Overflow sub_res = batch_sub_overflow_long(&curr_remainder, to_cslice(curr_remainder), den);
-            curr_remainder = striped_trailing_zeros(curr_remainder);
-            assert(sub_res.overflow == 0 && "should not overflow");
+            Result sub_res = sub_in_place(&curr_remainder, den);
+            assert(sub_res.state == OK);
 
             if(DO_QUOTIENT)
                 set_nth_bit(&trimmed_quotient, i, 1);
@@ -1529,12 +1623,12 @@ Div_Result div(Slice* quotient, Slice* remainder, CSlice num, CSlice den, const 
 
 Result rem(Slice* remainder, CSlice num, CSlice den, const Optims* optims)
 {
-    Slice quotient = {nullptr, 0};
+    Slice quotient = {NULL, 0};
     Div_Result div_res = div_bit_by_bit_(&quotient, remainder, num, den, optims, false);
     Result result = {div_res.state, div_res.remainder};
 
     assert(div_res.quotient.size == 0 && "in case of only remainder the quotient size should be 0");
-    assert(div_res.quotient.data == nullptr && "and data nullptr as we set it");
+    assert(div_res.quotient.data == NULL && "and data nullptr as we set it");
     return result;
 }
 
@@ -1550,18 +1644,17 @@ Batch_Overflow batch_fused_mul_add_overflow(Slice* to, CSlice added, CSlice mult
     if(coeficient == 0) 
     {
         if (to->data == added.data)
-            return Batch_Overflow{trim(*to, 0), 0};
+            return make_batch_overflow(trim(*to, 0), 0);
         else
         {
             copy_slice(&trimmed_to, added);
-            return Batch_Overflow{trimmed_to, 0};
+            return make_batch_overflow(trimmed_to, 0);
         }
     }
 
     if(coeficient == 1)
-        return batch_add_overflow_long(to, added, multiplied);
+        return batch_add_overflow_long(to, added, multiplied, 0);
 
-    Slice trimmed_to = trim(*to, added.size);
     if(optims->mul_shift 
         && single_is_power_of_two(coeficient))
     {
@@ -1591,7 +1684,7 @@ Batch_Overflow batch_fused_mul_add_overflow(Slice* to, CSlice added, CSlice mult
             const Digit curr_muled = at(multiplied, j);
             const Digit curr_added = at(added, j);
 
-            Single_Overflow mul_res = single_mul_overflow(curr_muled, coeficient, mul_carry);
+            Single_Overflow mul_res = single_mul_overflow(curr_muled, coeficient, mul_carry, MUL_OPTIMS_NONE);
             Single_Overflow add_res = single_add_overflow(curr_added, mul_res.value, add_carry);
 
             at(trimmed_to, j) = add_res.value;
@@ -1602,7 +1695,10 @@ Batch_Overflow batch_fused_mul_add_overflow(Slice* to, CSlice added, CSlice mult
     }
 
     const Digit combined_carry = single_add_no_overflow(mul_carry, add_carry, 0);
-    return batch_add_overflow_short(&trimmed_to, added, combined_carry, multiplied.size);
+    Slice remaining_to = slice(trimmed_to, multiplied.size);
+    CSlice remaining_added = cslice(added, multiplied.size);
+
+    return batch_add_overflow_short(&remaining_to, remaining_added, combined_carry);
 }
 
 size_t required_mul_quadratic_out_size(size_t left_size, size_t right_size)
@@ -1640,19 +1736,16 @@ Result mul_quadratic(Slice* to, Slice* temp, CSlice left, CSlice right, const Op
 
     for(size_t i = 0; i < right.size; i++)
     {
-        Batch_Overflow mul_res = batch_mul_overflow(&trimmed_temp, left, at(right, i), optims);
-
-        //batch_mul_overflow is limited to left.size elems => in case of overflow
-        // even if the overflow would fit into temp it is not added => we add it back
-        size_t mul_size = mul_res.slice.size;
-        Slice mul_slice = trim(trimmed_temp, mul_size + 1); 
-        at(mul_slice, mul_size) = mul_res.overflow;
-
         Slice shifted_to = slice(trimmed_to, i);
+
+        Result mul_res = mul_short(&trimmed_temp, left, at(right, i), optims);
+        assert(mul_res.state == OK);
+
+        Slice mul_slice = mul_res.output; 
         assert(shifted_to.size >= mul_slice.size);
 
-        Batch_Overflow add_res = batch_add_overflow_long(&shifted_to, to_cslice(shifted_to), to_cslice(mul_slice));
-        assert(add_res.overflow == 0 && "no final carry should be left");
+        Result add_res = add(&shifted_to, to_cslice(shifted_to), to_cslice(mul_slice));
+        assert(add_res.state == OK);
     }
 
     Slice output = striped_trailing_zeros(trimmed_to);
@@ -1832,13 +1925,13 @@ Result mul_karatsuba_(Slice* to, Slice* aux, CSlice left, CSlice right, const Op
     Slice y_sum = add(&y_sum_slot, y1, y2).output;
 
     Slice x_sum_y_sum = mul_(&z2_slot, &remaining_aux, to_cslice(x_sum), to_cslice(y_sum), optims, depth + 1).output;
-    Slice x_sum_y_sum_m_z1 = sub_(&x_sum_y_sum, to_cslice(x_sum_y_sum), to_cslice(z1)).output;
-    Slice z2 = sub_(&x_sum_y_sum_m_z1, to_cslice(x_sum_y_sum_m_z1), to_cslice(z3)).output;
+    Slice x_sum_y_sum_m_z1 = sub_in_place(&x_sum_y_sum, to_cslice(z1)).output;
+    Slice z2 = sub_in_place(&x_sum_y_sum_m_z1, to_cslice(z3)).output;
 
     //instead of multiplying z2 by base we add it to the appropriate position
     Slice out_z2_up = slice(trimmed_out, base);
 
-    Batch_Overflow add_res = batch_add_overflow_long(&out_z2_up, to_cslice(out_z2_up), to_cslice(z2));
+    Batch_Overflow add_res = batch_add_overflow_long(&out_z2_up, to_cslice(out_z2_up), to_cslice(z2), 0);
     assert(add_res.overflow == 0 && "should not overflow");
 
     Slice output = striped_trailing_zeros(trimmed_out);
@@ -2277,7 +2370,7 @@ Result root(Slice* to, Slice* aux, CSlice num, umax root, const Optims* optims)
         if(dived.size != 0)
             fused_result = batch_fused_mul_add_overflow(&new_estimate_to, to_cslice(dived), to_cslice(prev_estimate), cast(Digit) root - 1, optims, 0, 0);
         else
-            fused_result = batch_mul_overflow(&new_estimate_to, to_cslice(prev_estimate), cast(Digit) root - 1, optims);
+            fused_result = batch_mul_overflow(&new_estimate_to, to_cslice(prev_estimate), cast(Digit) root - 1, optims, 0);
 
         assert(fused_result.overflow == 0 && "should not overflow");
         assert(is_striped_number(to_cslice(fused_result.slice)));
@@ -2285,9 +2378,10 @@ Result root(Slice* to, Slice* aux, CSlice num, umax root, const Optims* optims)
 
 
         //r = new_upper_r / n;
-        Slice new_upper_estimate = fused_result.slice;
-        Slice new_estimate_pre = batch_div_overflow(&new_upper_estimate, to_cslice(new_upper_estimate), cast(Digit) root, optims).slice;
-        Slice new_estimate = striped_trailing_zeros(new_estimate_pre);
+
+        Div_Short_Result div_result = div_short_in_place(&fused_result.slice, cast(Digit) root, optims);
+        assert(div_result.state == OK);
+        Slice new_estimate = div_result.quotient;
         curr_estimate = new_estimate;
 
         //if(r >= prev_r)
@@ -2307,33 +2401,43 @@ Result root(Slice* to, Slice* aux, CSlice num, umax root, const Optims* optims)
 }
 
 
+Power_And_Powed make_pow_and_powed(umax power, umax powed)
+{
+    Power_And_Powed res = {power, powed};
+    return res;
+}
+
 Power_And_Powed highest_power_of_in_bits(size_t bit_size, umax base)
 {
     assert(bit_size <= 64 && "no higher sizes supported");
 
     if(bit_size <= 1) 
-        return {0, 1};
+        return make_pow_and_powed(0, 1);
 
     switch(base)
     {
     case 10: 
-        if(bit_size < 4)    return {0, 1};
-        if(bit_size == 4)   return {1, 10};
-        if(bit_size == 8)   return {2, 100};
-        if(bit_size == 16)  return {4, 10'000};
-        if(bit_size == 32)  return {9, 1'000'000'000};
-        if(bit_size == 64)  return {19, 10'000'000'000'000'000'000};
+        if(bit_size < 4)    return make_pow_and_powed(0, 1);
+        if(bit_size == 4)   return make_pow_and_powed(1, 10);
+        if(bit_size == 8)   return make_pow_and_powed(2, 100);
+        if(bit_size == 16)  return make_pow_and_powed(4, 10000);
+        if(bit_size == 32)  return make_pow_and_powed(9, 1000000000ull);
+        if(bit_size == 64)  return make_pow_and_powed(19, 10000000000000000000ull);
 
         break;
 
-    case 2:
-        //if(bit_size == 64)
-        //bit_size = 63;
+    case 2: {
+        umax power = (bit_size - 1);
+        umax powed = 1ull << power;
 
-        return {(bit_size - 1), 1ull << (bit_size - 1)};
+        return make_pow_and_powed(power, powed);
+    }
+    case 16:{
+        umax power = (bit_size - 1)/4;
+        umax powed = 1ull << (power*4);
 
-    case 16:
-        return {(bit_size - 1)/4, 1ull << (((bit_size - 1)/4) * 4)};
+        return make_pow_and_powed(power, powed);
+    }
     }
 
     umax max = 0;
@@ -2345,7 +2449,8 @@ Power_And_Powed highest_power_of_in_bits(size_t bit_size, umax base)
     umax power = single_log_bsearch(max, base);
     umax powed = single_pow_by_squaring(base, power);
 
-    return {power, powed};
+    Power_And_Powed result = {power, powed};
+    return result;
 }
 
 size_t required_to_base_out_size(size_t num_size, umax to_base, size_t digit_bit_size)
@@ -2426,11 +2531,14 @@ Digit pop_digit(Pop_Digit* pop, Slice* out, const Optims* optims)
         }
 
         Slice used_portion = trim(*out, pop->num_size);
-        Batch_Overflow res = batch_div_overflow(out, to_cslice(used_portion), cast(Digit) pop->highest.powed, optims);
+        assert(is_striped_number(to_cslice(used_portion)));
+
+        Div_Short_Result res = div_short_in_place(&used_portion, cast(Digit) pop->highest.powed, optims);
+        assert(res.state == OK);
 
         pop->stashed_power = pop->highest.power;
-        pop->stashed_value = res.overflow;
-        pop->num_size = find_first_set_digit(to_cslice(res.slice)) + 1;
+        pop->stashed_value = res.remainder;
+        pop->num_size = res.quotient.size;
     }
 
     bool is_last_block = pop->num_size == 0;
@@ -2459,7 +2567,7 @@ Result pop_digit_result(Pop_Digit* pop, Slice* out, const Optims* optims)
     Result muled = mul_short(out, to_cslice(trimmed_out), cast(Digit) pop->stashed_power, optims);
     if(muled.state != OK)
         return muled;
-    
+
     Result added = add_short(out, to_cslice(trimmed_out), cast(Digit) pop->stashed_value);
     return added;
 }
@@ -2556,20 +2664,20 @@ Result push_digit_result(Push_Digit* push, Slice* out, const Optims* optims)
             return error_result(flush_state);
     }
 
-    Slice out = trim(*out, push->num_size);
-    return ok_result(*out);
+    Slice output = trim(*out, push->num_size);
+    return ok_result(output);
 }
 
 char to_char(Digit value)
 {
-    constexpr char val_to_char_table[36] = {
+    const char val_to_char_table[36] = {
         '0', '1', '2', '3', '4', '5', '6', '7', '8', '9',
         'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J',
         'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T',
         'U', 'V', 'W', 'X', 'Y', 'Z'
     };
 
-    if(value > 36)
+    if(value >= 36)
         return -1;
     else
         return val_to_char_table[value];
@@ -2579,69 +2687,69 @@ Digit to_digit(char value)
 {
     switch(value)
     {
-        default: return -1;
-        case '0': return 0;
-        case '1': return 1;
-        case '2': return 2;
-        case '3': return 3;
-        case '4': return 4;
-        case '5': return 5;
-        case '6': return 6;
-        case '7': return 7;
-        case '8': return 8;
-        case '9': return 9;
-        case 'A': return 10;
-        case 'a': return 10;
-        case 'B': return 11;
-        case 'b': return 11;
-        case 'C': return 12;
-        case 'c': return 12;
-        case 'D': return 13;
-        case 'd': return 13;
-        case 'E': return 14;
-        case 'e': return 14;
-        case 'F': return 15;
-        case 'f': return 15;
-        case 'G': return 16;
-        case 'g': return 16;
-        case 'H': return 17;
-        case 'h': return 17;
-        case 'I': return 18;
-        case 'i': return 18;
-        case 'J': return 19;
-        case 'j': return 19;
-        case 'K': return 20;
-        case 'k': return 20;
-        case 'L': return 21;
-        case 'l': return 21;
-        case 'M': return 22;
-        case 'm': return 22;
-        case 'N': return 23;
-        case 'n': return 23;
-        case 'O': return 24;
-        case 'o': return 24;
-        case 'P': return 25;
-        case 'p': return 25;
-        case 'Q': return 26;
-        case 'q': return 26;
-        case 'R': return 27;
-        case 'r': return 27;
-        case 'S': return 28;
-        case 's': return 28;
-        case 'T': return 29;
-        case 't': return 29;
-        case 'U': return 30;
-        case 'u': return 30;
-        case 'V': return 31;
-        case 'v': return 32;
-        case 'W': return 32;
-        case 'w': return 32;
-        case 'X': return 33;
-        case 'x': return 33;
-        case 'Y': return 34;
-        case 'y': return 34;
-        case 'Z': return 35;
-        case 'z': return 35;
+    default: return -1;
+    case '0': return 0;
+    case '1': return 1;
+    case '2': return 2;
+    case '3': return 3;
+    case '4': return 4;
+    case '5': return 5;
+    case '6': return 6;
+    case '7': return 7;
+    case '8': return 8;
+    case '9': return 9;
+    case 'A': return 10;
+    case 'a': return 10;
+    case 'B': return 11;
+    case 'b': return 11;
+    case 'C': return 12;
+    case 'c': return 12;
+    case 'D': return 13;
+    case 'd': return 13;
+    case 'E': return 14;
+    case 'e': return 14;
+    case 'F': return 15;
+    case 'f': return 15;
+    case 'G': return 16;
+    case 'g': return 16;
+    case 'H': return 17;
+    case 'h': return 17;
+    case 'I': return 18;
+    case 'i': return 18;
+    case 'J': return 19;
+    case 'j': return 19;
+    case 'K': return 20;
+    case 'k': return 20;
+    case 'L': return 21;
+    case 'l': return 21;
+    case 'M': return 22;
+    case 'm': return 22;
+    case 'N': return 23;
+    case 'n': return 23;
+    case 'O': return 24;
+    case 'o': return 24;
+    case 'P': return 25;
+    case 'p': return 25;
+    case 'Q': return 26;
+    case 'q': return 26;
+    case 'R': return 27;
+    case 'r': return 27;
+    case 'S': return 28;
+    case 's': return 28;
+    case 'T': return 29;
+    case 't': return 29;
+    case 'U': return 30;
+    case 'u': return 30;
+    case 'V': return 31;
+    case 'v': return 32;
+    case 'W': return 32;
+    case 'w': return 32;
+    case 'X': return 33;
+    case 'x': return 33;
+    case 'Y': return 34;
+    case 'y': return 34;
+    case 'Z': return 35;
+    case 'z': return 35;
     }
 }
 
@@ -2679,10 +2787,10 @@ Char_Result to_chars(Char_Slice* rep, Slice* aux, CSlice num, Digit base, const 
 
     if(base <= 2)
         error_char_result(ARGUMENTS_TOO_SMALL);
-        
+
     if(high_bits(base) != 0)    
         error_char_result(ARGUMENTS_TOO_BIG);
-        
+
 
     bool is_first = true;
     size_t to_size = 0;
@@ -2701,10 +2809,11 @@ Char_Result to_chars(Char_Slice* rep, Slice* aux, CSlice num, Digit base, const 
     bool iterate = true;
     while(iterate)
     {
-        Batch_Overflow res = batch_div_overflow(aux, val_current, cast(Digit) highest.powed, optims);
+        Div_Short_Result res = div_short(aux, val_current, cast(Digit) highest.powed, optims);
+        assert(res.state == OK);
 
-        Digit highest_power_rem = res.overflow;
-        val_current = to_cslice(striped_trailing_zeros(res.slice));
+        Digit highest_power_rem = res.remainder;
+        val_current = to_cslice(res.quotient);
 
         bool is_last_block = val_current.size == 0;
         for(size_t j = 0; j < highest.power; j++)

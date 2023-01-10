@@ -1,7 +1,8 @@
-#include <cstdint>
-#include <cstddef>
-#include <cassert>
-#include <cstring>
+#include <stdint.h>
+#include <stddef.h>
+#include <assert.h>
+#include <string.h>
+#include <stdbool.h>
 
 #if !defined(TINY_NUM_FIRST_TIME_INCLUDED) && !defined(INCLUDED_NEW_TYPE)
     #define INCLUDED_NEW_TYPE size_t
@@ -20,7 +21,7 @@ typedef INCLUDED_NEW_TYPE Digit;
 //maximum avalible unsigned type
 typedef MAX_UNSIGNED_TYPE umax;
 
-enum State
+typedef enum State
 {
     OK = 0,                 
     OK_EXEPTIONAL,          //State where the result is well defined yet not normal
@@ -41,7 +42,7 @@ enum State
     //NUMBER_NOT_STRIPPED,  //considered hard errors that should be prevented! 
                             // (requires outside manipulation to get into invalid state)
     //INVALID_ALIASING,     //considered hard error
-};
+} State;
 
 typedef struct Optims
 {
@@ -98,6 +99,12 @@ typedef struct Result
     Slice output;
 } Result;
 
+typedef struct Rem_Result
+{
+    State state;
+    Digit remainder;
+} Rem_Result;
+
 typedef struct Div_Short_Result
 {
     State state;
@@ -126,6 +133,22 @@ Result sub_short_in_place(Slice* left, Digit right);
 Result mul_short(Slice* to, CSlice left, Digit right, const Optims* optims);
 Div_Short_Result div_short(Slice* to, CSlice left, Digit right, const Optims* optims);
 Div_Short_Result div_short_in_place(Slice* left, Digit right, const Optims* optims);
+Rem_Result rem_short(CSlice left, Digit right, const Optims* optims);
+
+//performs *to = add_to + multiplied_by * added in a single pass
+//Result add_muled(Slice* to, CSlice add_to, Digit multiplied_by, CSlice added, const Optims* optims);
+
+//@TODO:
+// add_muled
+// sub_muled
+// add_dived
+// sub_dived
+
+// mul_then_add
+// ...
+
+// add_then_mul 
+// ...
 
 //general purpose algorhitms
 // the most general name refers to a version that should be most commonly used and
@@ -145,9 +168,9 @@ Result pow_by_squaring       (Slice* to, Slice* aux, CSlice num, umax power, con
 Result pow_trivial           (Slice* to, Slice* aux, CSlice num, umax power, const Optims* optims);
 Result pow                   (Slice* to, Slice* aux, CSlice num, umax power, const Optims* optims);
 Result root                  (Slice* to, Slice* aux, CSlice num, umax root, const Optims* optims);
+Result factorial             (Slice* out, size_t of_value, const Optims* optims);
 size_t log2(CSlice left);
 size_t bit_size(CSlice left); //same as log2 only different name
-Result factorial(Slice* out, size_t of_value, const Optims* optims);
 
 int compare(CSlice left, CSlice right);
 bool is_equal(CSlice left, CSlice right);
